@@ -32,7 +32,6 @@ import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
-import android.view.GestureDetector;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
@@ -64,6 +63,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Quiet: distraction-aware home replacement. No analytics, network SDK or external dependencies. */
 public final class MainActivity extends Activity {
@@ -78,7 +79,12 @@ public final class MainActivity extends Activity {
     private PackageManager pm;
     private AppWidgetHost widgetHost;
     private AppWidgetManager widgetManager;
-    private GestureDetector gestures;
+    private final ExecutorService background = Executors.newSingleThreadExecutor();
+    private static final String[] MAIN_PAGES = {"home", "apps", "root", "inbox", "settings"};
+    private float swipeX, swipeY;
+    private long swipeWhen, lastSwipeAt;
+    private boolean swipeCandidate;
+    private boolean refreshRunning;
     private final List<App> apps = new ArrayList<>();
     private final Map<String, Long> usage = new HashMap<>();
     private final Map<String, Boolean> expanded = new HashMap<>();
@@ -107,40 +113,21 @@ public final class MainActivity extends Activity {
         pm = getPackageManager();
         widgetManager = AppWidgetManager.getInstance(this);
         widgetHost = new AppWidgetHost(this, WIDGET_HOST_ID);
-        gestures = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
-            @Override public boolean onDown(MotionEvent e) { return true; }
-            @Override public boolean onFling(MotionEvent a, MotionEvent b, float vx, float vy) {
-                if (a == null || b == null || getCurrentFocus() instanceof EditText) return false;
-                float dx = b.getX() - a.getX(), dy = b.getY() - a.getY();
-                String next = null;
-                if (Math.abs(dx) > dp(110) && Math.abs(dx) > Math.abs(dy) * 1.8f) {
-                    if (dx < 0 && page.equals("home")) next = "inbox";
-                    else if (dx > 0 && page.equals("home")) next = "root";
-                    else if (page.equals("root") || page.equals("inbox")) next = "home";
-                } else if (dy < -dp(130) && Math.abs(dy) > Math.abs(dx) * 2f
-                        && page.equals("home")
-                        && a.getY() > getWindow().getDecorView().getHeight() - dp(180)) {
-                    // Only use a bottom-edge upward gesture for the drawer.
-                    // A regular upward swipe should scroll the home content.
-                    next = "apps";
-                }
-                if (next == null) return false;
-                final String destination = next;
-                // Delay page changes until the active touch dispatch has finished.
-                handler.post(() -> show(destination));
-                return true;
-            }
-        });
-        loadApps();
-        updateUsage();
         setPalette();
         render();
+        refreshAsync();
         handler.postDelayed(new Runnable() {
             @Override public void run() {
                 updateFocusClock();
                 handler.postDelayed(this, 1000);
             }
         }, 1000);
+    }
+
+    @Override protected void onDestroy() {
+        handler.removeCallbacksAndMessages(null);
+        background.shutdownNow();
+        super.onDestroy();
     }
 
     @Override protected void onStart() {
@@ -155,27 +142,79 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        // onResume is called right after onCreate, which already loaded everything.
-        // Avoid a second expensive package scan / usage query on startup.
         if (initialResumePending) {
             initialResumePending = false;
-            lastRefreshElapsed = SystemClock.elapsedRealtime();
             return;
         }
-        if (prefs != null && shell != null) {
-            long now = SystemClock.elapsedRealtime();
-            if (now - lastRefreshElapsed < 10000 && hasUsage == hasUsageAccess()) return;
-            lastRefreshElapsed = now;
-            loadApps(); updateUsage(); render();
+        if (SystemClock.elapsedRealtime() - lastRefreshElapsed >= 15000) refreshAsync();
+    }
+
+    // Observe one deliberate left/right swipe. Never consume touch streams;
+    // Android's ScrollView, edit fields and buttons must always receive them.
+    @Override public boolean dispatchTouchEvent(MotionEvent e) {
+        int action = e.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            int height = getWindow().getDecorView().getHeight();
+            swipeCandidate = e.getY() >= dp(100) && e.getY() <= height - dp(100);
+            swipeX = e.getX();
+            swipeY = e.getY();
+            swipeWhen = e.getEventTime();
+        } else if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_POINTER_DOWN) {
+            swipeCandidate = false;
+        }
+        boolean swipe = false;
+        boolean left = false;
+        if (action == MotionEvent.ACTION_UP && swipeCandidate) {
+            float dx = e.getX() - swipeX;
+            float dy = e.getY() - swipeY;
+            long now = e.getEventTime();
+            swipe = Math.abs(dx) >= dp(130)
+                    && Math.abs(dx) > Math.abs(dy) * 2.25f
+                    && Math.abs(dy) < dp(80)
+                    && now - swipeWhen < 950
+                    && now - lastSwipeAt >= 480;
+            left = dx < 0;
+            swipeCandidate = false;
+            if (swipe) lastSwipeAt = now;
+        }
+        boolean result = super.dispatchTouchEvent(e);
+        if (swipe) {
+            final boolean swipeLeft = left;
+            handler.post(() -> swipeOnePage(swipeLeft));
+        }
+        return result;
+    }
+
+    private void swipeOnePage(boolean toLeft) {
+        for (int i = 0; i < MAIN_PAGES.length; i++) {
+            if (page.equals(MAIN_PAGES[i])) {
+                int next = i + (toLeft ? 1 : -1);
+                if (next >= 0 && next < MAIN_PAGES.length) show(MAIN_PAGES[next]);
+                break;
+            }
         }
     }
 
-    @Override public boolean dispatchTouchEvent(MotionEvent event) {
-        // GestureDetector.onDown() returns true to start recognition. That does
-        // NOT mean the activity should consume ACTION_DOWN: doing so prevents
-        // ScrollView, buttons, and app tiles from receiving their touch streams.
-        if (gestures != null) gestures.onTouchEvent(event);
-        return super.dispatchTouchEvent(event);
+    private void refreshAsync() {
+        if (refreshRunning || background.isShutdown()) return;
+        refreshRunning = true;
+        lastRefreshElapsed = SystemClock.elapsedRealtime();
+        background.execute(() -> {
+            List<App> resultApps = discoverApps();
+            boolean allowed = hasUsageAccess();
+            Map<String, Long> resultUsage = allowed ? discoverUsage() : new HashMap<>();
+            handler.post(() -> {
+                refreshRunning = false;
+                if (isFinishing() || isDestroyed()) return;
+                apps.clear();
+                apps.addAll(resultApps);
+                usage.clear();
+                usage.putAll(resultUsage);
+                hasUsage = allowed;
+                // Never recreate the tree while someone is typing a search.
+                if (!(getCurrentFocus() instanceof EditText)) render();
+            });
+        });
     }
 
     @Override public void onBackPressed() {
@@ -252,7 +291,7 @@ public final class MainActivity extends Activity {
         add(view, r, 23);
     }
 
-    private void show(String next) { page = next; render(); }
+    private void show(String next) { if (next.equals(page) && shell != null) return; page = next; render(); }
     private void render() {
         if (prefs == null) return;
         setPalette(); focusLive = null; clockLive = null;
@@ -264,7 +303,6 @@ public final class MainActivity extends Activity {
                     dp(18), insets.getSystemWindowInsetBottom() + dp(6));
             return insets;
         });
-        setContentView(shell);
         top = row(); top.setPadding(dp(2), dp(5), dp(2), dp(12));
         TextView brand = text("QUIET /", 16, ink, true);
         brand.setLetterSpacing(0.08f);
@@ -288,21 +326,32 @@ public final class MainActivity extends Activity {
             default: renderSettings(); break;
         }
         shell.addView(bottomNav());
+        // Build the whole screen detached, then attach once per navigation.
+        setContentView(shell);
     }
 
     private LinearLayout bottomNav() {
         LinearLayout nav = row();
-        nav.setPadding(dp(2), dp(11), dp(2), dp(3));
-        View border = new View(this); border.setBackgroundColor(line);
+        nav.setPadding(dp(1), dp(7), dp(1), dp(3));
+        View border = new View(this);
+        border.setBackgroundColor(line);
         shell.addView(border, new LinearLayout.LayoutParams(-1, dp(1)));
-        String[][] tabs = {{"⌂", "home"}, {"▦", "apps"}, {"◷", "root"}, {"▤", "inbox"}, {"⚙", "settings"}};
+        String[][] tabs = {{"⌂", "Home", "home"}, {"▦", "Apps", "apps"},
+                {"◷", "Day", "root"}, {"▤", "Chats", "inbox"}, {"⚙", "Settings", "settings"}};
         for (String[] tab : tabs) {
-            boolean active = page.equals(tab[1]) || (page.equals("widgets") && tab[1].equals("root"));
-            TextView tv = text(tab[0], 23, active ? ink : muted, false);
-            tv.setGravity(Gravity.CENTER); tv.setContentDescription(tab[1]);
-            if (active) tv.setBackground(shape(surface2, 14, 0));
-            nav.addView(tv, new LinearLayout.LayoutParams(0, dp(48), 1));
-            tv.setOnClickListener(v -> show(tab[1]));
+            boolean active = page.equals(tab[2]) || (page.equals("widgets") && tab[2].equals("root"));
+            LinearLayout cell = column();
+            cell.setGravity(Gravity.CENTER);
+            cell.setContentDescription(tab[1]);
+            TextView symbol = text(tab[0], 19, active ? ink : muted, false);
+            symbol.setGravity(Gravity.CENTER);
+            TextView name = text(tab[1], 10, active ? ink : muted, active);
+            name.setGravity(Gravity.CENTER);
+            cell.addView(symbol);
+            cell.addView(name);
+            if (active) cell.setBackground(shape(surface2, 13, 0));
+            nav.addView(cell, new LinearLayout.LayoutParams(0, dp(54), 1));
+            cell.setOnClickListener(v -> show(tab[2]));
         }
         return nav;
     }
@@ -620,7 +669,7 @@ public final class MainActivity extends Activity {
             }).setNegativeButton("Cancel", null).show();
     }
 
-    private void loadApps() {
+    private List<App> discoverApps() {
         List<App> fresh = new ArrayList<>();
         Intent i = new Intent(Intent.ACTION_MAIN); i.addCategory(Intent.CATEGORY_LAUNCHER);
         for (ResolveInfo ri : pm.queryIntentActivities(i, 0)) {
@@ -636,7 +685,7 @@ public final class MainActivity extends Activity {
             if (!exists) fresh.add(new App(n, p, groupFor(n, p), launch));
         }
         fresh.sort(Comparator.comparing(a -> a.name.toLowerCase(Locale.ROOT)));
-        apps.clear(); apps.addAll(fresh);
+        return fresh;
     }
     private String groupFor(String title, String pkg) {
         String s = (pkg + " " + title).toLowerCase(Locale.ROOT);
@@ -841,20 +890,23 @@ public final class MainActivity extends Activity {
             return result == AppOpsManager.MODE_ALLOWED;
         } catch (Exception ignored) { return false; }
     }
-    private void updateUsage() {
-        hasUsage = hasUsageAccess(); usage.clear();
-        if (!hasUsage) return;
+    private Map<String, Long> discoverUsage() {
+        Map<String, Long> found = new HashMap<>();
         try {
             UsageStatsManager us = (UsageStatsManager) getSystemService(USAGE_STATS_SERVICE);
+            if (us == null) return found;
             Calendar cal = Calendar.getInstance();
-            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0);
-            cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0);
+            cal.set(Calendar.HOUR_OF_DAY, 0);
+            cal.set(Calendar.MINUTE, 0);
+            cal.set(Calendar.SECOND, 0);
+            cal.set(Calendar.MILLISECOND, 0);
             Map<String, UsageStats> stats = us.queryAndAggregateUsageStats(cal.getTimeInMillis(), System.currentTimeMillis());
-            for (Map.Entry<String, UsageStats> entry : stats.entrySet()) {
+            if (stats != null) for (Map.Entry<String, UsageStats> entry : stats.entrySet()) {
                 long ms = entry.getValue().getTotalTimeInForeground();
-                if (ms > 0) usage.put(entry.getKey(), ms);
+                if (ms > 0) found.put(entry.getKey(), ms);
             }
         } catch (Exception ignored) { }
+        return found;
     }
     private long totalUsage() {
         long total = 0;
