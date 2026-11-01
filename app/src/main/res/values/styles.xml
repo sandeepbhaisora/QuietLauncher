@@ -1,9 +1,23 @@
 <resources>
-    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+    <!-- Native platform themes: every AlertDialog follows the chosen page theme. -->
+    <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:colorAccent">#71856B</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:colorAccent">#A8C5A1</item>
         <item name="android:windowBackground">#101311</item>
+        <item name="android:statusBarColor">#101311</item>
+        <item name="android:navigationBarColor">#101311</item>
+    </style>
+    <style name="AppThemePaper" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:colorAccent">#536C50</item>
+        <item name="android:windowBackground">#F2F0E9</item>
+        <item name="android:statusBarColor">#F2F0E9</item>
+        <item name="android:navigationBarColor">#F2F0E9</item>
     </style>
 </resources>

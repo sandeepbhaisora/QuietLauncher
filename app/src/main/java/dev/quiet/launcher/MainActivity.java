@@ -33,7 +33,6 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -81,10 +80,8 @@ public final class MainActivity extends Activity {
     private AppWidgetManager widgetManager;
     private final ExecutorService background = Executors.newSingleThreadExecutor();
     private static final String[] MAIN_PAGES = {"home", "apps", "root", "inbox", "settings"};
-    private float swipeX, swipeY;
-    private long swipeWhen, lastSwipeAt;
-    private boolean swipeCandidate;
     private boolean refreshRunning;
+    private final Map<String, Integer> groupDisplayLimits = new HashMap<>();
     private final List<App> apps = new ArrayList<>();
     private final Map<String, Long> usage = new HashMap<>();
     private final Map<String, Boolean> expanded = new HashMap<>();
@@ -108,8 +105,17 @@ public final class MainActivity extends Activity {
     }
 
     @Override public void onCreate(Bundle state) {
+        // Select the OS theme before Activity creation. Platform AlertDialogs
+        // inherit it, including multi-selects, buttons and text inputs.
+        SharedPreferences startupPrefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if ("paper".equals(startupPrefs.getString("theme", "ink"))) {
+            setTheme(R.style.AppThemePaper);
+        } else {
+            setTheme(R.style.AppTheme);
+        }
         super.onCreate(state);
-        prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        prefs = startupPrefs;
+        if (state != null) page = state.getString("quiet.page", "home");
         pm = getPackageManager();
         widgetManager = AppWidgetManager.getInstance(this);
         widgetHost = new AppWidgetHost(this, WIDGET_HOST_ID);
@@ -122,6 +128,11 @@ public final class MainActivity extends Activity {
                 handler.postDelayed(this, 1000);
             }
         }, 1000);
+    }
+
+    @Override protected void onSaveInstanceState(Bundle out) {
+        out.putString("quiet.page", page);
+        super.onSaveInstanceState(out);
     }
 
     @Override protected void onDestroy() {
@@ -149,50 +160,17 @@ public final class MainActivity extends Activity {
         if (SystemClock.elapsedRealtime() - lastRefreshElapsed >= 15000) refreshAsync();
     }
 
-    // Observe one deliberate left/right swipe. Never consume touch streams;
-    // Android's ScrollView, edit fields and buttons must always receive them.
-    @Override public boolean dispatchTouchEvent(MotionEvent e) {
-        int action = e.getActionMasked();
-        if (action == MotionEvent.ACTION_DOWN) {
-            int height = getWindow().getDecorView().getHeight();
-            swipeCandidate = e.getY() >= dp(100) && e.getY() <= height - dp(100);
-            swipeX = e.getX();
-            swipeY = e.getY();
-            swipeWhen = e.getEventTime();
-        } else if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_POINTER_DOWN) {
-            swipeCandidate = false;
-        }
-        boolean swipe = false;
-        boolean left = false;
-        if (action == MotionEvent.ACTION_UP && swipeCandidate) {
-            float dx = e.getX() - swipeX;
-            float dy = e.getY() - swipeY;
-            long now = e.getEventTime();
-            swipe = Math.abs(dx) >= dp(130)
-                    && Math.abs(dx) > Math.abs(dy) * 2.25f
-                    && Math.abs(dy) < dp(80)
-                    && now - swipeWhen < 950
-                    && now - lastSwipeAt >= 480;
-            left = dx < 0;
-            swipeCandidate = false;
-            if (swipe) lastSwipeAt = now;
-        }
-        boolean result = super.dispatchTouchEvent(e);
-        if (swipe) {
-            final boolean swipeLeft = left;
-            handler.post(() -> swipeOnePage(swipeLeft));
-        }
-        return result;
-    }
-
-    private void swipeOnePage(boolean toLeft) {
+    // Intentionally no activity-wide gesture interception in v0.2:
+    // normal tapping, lists and scrolling should take precedence.
+    private void navigateRelative(int delta) {
         for (int i = 0; i < MAIN_PAGES.length; i++) {
-            if (page.equals(MAIN_PAGES[i])) {
-                int next = i + (toLeft ? 1 : -1);
-                if (next >= 0 && next < MAIN_PAGES.length) show(MAIN_PAGES[next]);
-                break;
+            if (MAIN_PAGES[i].equals(page)) {
+                int target = i + delta;
+                if (target >= 0 && target < MAIN_PAGES.length) show(MAIN_PAGES[target]);
+                return;
             }
         }
+        if (!"home".equals(page)) show("home");
     }
 
     private void refreshAsync() {
@@ -308,8 +286,23 @@ public final class MainActivity extends Activity {
         brand.setLetterSpacing(0.08f);
         brand.setOnClickListener(v -> show("home"));
         top.addView(brand, new LinearLayout.LayoutParams(0, dp(35), 1));
-        TextView tag = pill("○  " + page.toUpperCase(Locale.ROOT), () -> show("settings"));
-        top.addView(tag);
+        if (page.equals("home") || page.equals("apps") || page.equals("root")
+                || page.equals("inbox") || page.equals("settings")) {
+            TextView back = pill("‹", () -> navigateRelative(-1));
+            back.setContentDescription("Previous screen");
+            top.addView(back);
+        }
+        TextView tag = pill("○  " + page.toUpperCase(Locale.ROOT), null);
+        LinearLayout.LayoutParams tagParams = new LinearLayout.LayoutParams(-2, -2);
+        tagParams.leftMargin = dp(7);
+        tagParams.rightMargin = dp(7);
+        top.addView(tag, tagParams);
+        if (page.equals("home") || page.equals("apps") || page.equals("root")
+                || page.equals("inbox") || page.equals("settings")) {
+            TextView next = pill("›", () -> navigateRelative(1));
+            next.setContentDescription("Next screen");
+            top.addView(next);
+        }
         shell.addView(top);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(false); scroll.setVerticalScrollBarEnabled(false);
@@ -457,7 +450,18 @@ public final class MainActivity extends Activity {
         }
         if (!q.isEmpty()) {
             add(result, label(visible.size() + " MATCHING APPS"), 17);
-            for (App a : visible) appLine(result, a, false);
+            int shown = 0;
+            int queryLimit = groupDisplayLimits.getOrDefault("$search", 40);
+            for (App a : visible) {
+                if (shown++ >= queryLimit) break;
+                appLine(result, a, false);
+            }
+            if (visible.size() > queryLimit) {
+                add(result, pill("SHOW MORE MATCHES", () -> {
+                    groupDisplayLimits.put("$search", queryLimit + 40);
+                    renderAppList(result, q);
+                }), 13);
+            }
             if (visible.isEmpty()) add(result, text("No matching apps.", 14, muted, false), 13);
             TextView web = pill("SEARCH THE WEB FOR  \"" + q + "\"  ↗", () -> webSearch(q));
             add(result, web, 16);
@@ -473,7 +477,22 @@ public final class MainActivity extends Activity {
                 header.addView(text(filtered.size() + "   " + (isOpen ? "⌃" : "⌄"), 14, muted, false));
                 add(result, header, 8);
                 header.setOnClickListener(v -> { expanded.put(group, !isOpen); renderAppList(result, ""); });
-                if (isOpen) for (App a : filtered) appLine(result, a, true);
+                if (isOpen) {
+                    int maxVisible = groupDisplayLimits.getOrDefault(group, 20);
+                    int shown = 0;
+                    for (App a : filtered) {
+                        if (shown++ >= maxVisible) break;
+                        appLine(result, a, true);
+                    }
+                    if (filtered.size() > maxVisible) {
+                        TextView more = pill("SHOW MORE " + group.toUpperCase(Locale.ROOT)
+                                + "  ·  " + (filtered.size() - maxVisible) + " remaining", () -> {
+                            groupDisplayLimits.put(group, maxVisible + 25);
+                            renderAppList(result, "");
+                        });
+                        add(result, more, 11);
+                    }
+                }
             }
         }
     }
@@ -665,7 +684,10 @@ public final class MainActivity extends Activity {
             theme.equals("paper") ? 1 : theme.equals("black") ? 2 : 0,
             (dialog, which) -> {
                 prefs.edit().putString("theme", new String[]{"ink", "paper", "black"}[which]).apply();
-                dialog.dismiss(); render();
+                dialog.dismiss();
+                // Dialog/window theme is chosen before onCreate, so changing
+                // appearance requires a normal Activity recreation.
+                recreate();
             }).setNegativeButton("Cancel", null).show();
     }
 
