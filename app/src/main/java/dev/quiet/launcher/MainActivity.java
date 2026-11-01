@@ -90,6 +90,8 @@ public final class MainActivity extends Activity {
     private LinearLayout shell, main, top;
     private TextView focusLive, clockLive;
     private boolean hasUsage;
+    private boolean initialResumePending = true;
+    private long lastRefreshElapsed;
 
     private static final class App {
         final String name, packageName, group;
@@ -108,20 +110,25 @@ public final class MainActivity extends Activity {
         gestures = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onDown(MotionEvent e) { return true; }
             @Override public boolean onFling(MotionEvent a, MotionEvent b, float vx, float vy) {
-                if (a == null || b == null) return false;
+                if (a == null || b == null || getCurrentFocus() instanceof EditText) return false;
                 float dx = b.getX() - a.getX(), dy = b.getY() - a.getY();
-                if (Math.abs(dx) > dp(95) && Math.abs(dx) > Math.abs(dy) * 1.45f) {
-                    if (dx < 0 && page.equals("home")) show("inbox");
-                    else if (dx > 0 && page.equals("home")) show("root");
-                    else if (page.equals("root") || page.equals("inbox")) show("home");
-                    else return false;
-                    return true;
+                String next = null;
+                if (Math.abs(dx) > dp(110) && Math.abs(dx) > Math.abs(dy) * 1.8f) {
+                    if (dx < 0 && page.equals("home")) next = "inbox";
+                    else if (dx > 0 && page.equals("home")) next = "root";
+                    else if (page.equals("root") || page.equals("inbox")) next = "home";
+                } else if (dy < -dp(130) && Math.abs(dy) > Math.abs(dx) * 2f
+                        && page.equals("home")
+                        && a.getY() > getWindow().getDecorView().getHeight() - dp(180)) {
+                    // Only use a bottom-edge upward gesture for the drawer.
+                    // A regular upward swipe should scroll the home content.
+                    next = "apps";
                 }
-                if (Math.abs(dy) > dp(115) && Math.abs(dy) > Math.abs(dx) * 1.6f) {
-                    if (dy < 0 && page.equals("home")) { show("apps"); return true; }
-                    if (dy > 0 && page.equals("apps")) { show("home"); return true; }
-                }
-                return false;
+                if (next == null) return false;
+                final String destination = next;
+                // Delay page changes until the active touch dispatch has finished.
+                handler.post(() -> show(destination));
+                return true;
             }
         });
         loadApps();
@@ -148,13 +155,26 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        // onResume is called right after onCreate, which already loaded everything.
+        // Avoid a second expensive package scan / usage query on startup.
+        if (initialResumePending) {
+            initialResumePending = false;
+            lastRefreshElapsed = SystemClock.elapsedRealtime();
+            return;
+        }
         if (prefs != null && shell != null) {
+            long now = SystemClock.elapsedRealtime();
+            if (now - lastRefreshElapsed < 10000 && hasUsage == hasUsageAccess()) return;
+            lastRefreshElapsed = now;
             loadApps(); updateUsage(); render();
         }
     }
 
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
-        if (gestures != null && gestures.onTouchEvent(event)) return true;
+        // GestureDetector.onDown() returns true to start recognition. That does
+        // NOT mean the activity should consume ACTION_DOWN: doing so prevents
+        // ScrollView, buttons, and app tiles from receiving their touch streams.
+        if (gestures != null) gestures.onTouchEvent(event);
         return super.dispatchTouchEvent(event);
     }
 
