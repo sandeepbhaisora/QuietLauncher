@@ -5,7 +5,6 @@ import android.app.SearchManager;
 import android.app.AlertDialog;
 import android.app.AppOpsManager;
 import android.app.KeyguardManager;
-import android.app.PendingIntent;
 import android.appwidget.AppWidgetHost;
 import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
@@ -30,7 +29,6 @@ import android.os.Process;
 import android.os.SystemClock;
 import android.os.UserManager;
 import android.provider.Settings;
-import android.service.notification.StatusBarNotification;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
@@ -459,38 +457,24 @@ public final class MainActivity extends Activity {
     }
 
     private void renderInbox() {
-        add(main, text("Conversations,\nless distraction.", 31, ink, true), 18);
-        add(main, text("A quiet view of notifications. Messages stay in their original apps.", 14, muted, false), 8);
-        if (!notificationsEnabled()) {
-            LinearLayout card = card();
-            add(card, text("Give Quiet notification access to see your recent alerts here.", 15, ink, false), 0);
-            add(card, pill("ENABLE NOTIFICATIONS  ↗", () -> startSafe(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))), 12);
-            add(main, card, 22); return;
-        }
-        NotificationBridgeService srv = NotificationBridgeService.current();
-        if (srv == null) {
-            add(main, text("Notification access is enabled. Open Quiet again when new notifications arrive.", 14, muted, false), 20);
-            return;
-        }
-        List<StatusBarNotification> notifications = srv.recent();
-        section(main, notifications.size() + " ACTIVE ALERTS", "REFRESH  ↻", () -> show("inbox"));
-        for (StatusBarNotification sbn : notifications) {
-            Bundle extras = sbn.getNotification().extras;
-            CharSequence title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE);
-            CharSequence body = extras.getCharSequence(android.app.Notification.EXTRA_TEXT);
-            LinearLayout item = card();
-            add(item, label(appLabel(sbn.getPackageName())), 0);
-            add(item, text(title == null ? "Notification" : title.toString(), 15, ink, true), 6);
-            if (body != null) add(item, text(body.toString(), 13, muted, false), 5);
+        add(main, text("Conversations,\\nwithout the noise.", 31, ink, true), 18);
+        add(main, text("This direct-install edition does not read notifications, OTPs, or message contents.", 14, muted, false), 8);
+        section(main, "YOUR MESSAGING APPS", null, null);
+        int count = 0;
+        for (App app : apps) {
+            if (!"Messaging".equals(app.group) || getSet("hidden").contains(app.packageName)) continue;
+            LinearLayout item = row();
+            item.setPadding(dp(15), dp(13), dp(15), dp(13));
+            item.setBackground(shape(surface, 16, line));
+            item.addView(text(app.name, 16, ink, true), new LinearLayout.LayoutParams(0, -2, 1));
+            item.addView(text("›", 22, muted, false));
             add(main, item, 9);
-            item.setOnClickListener(v -> {
-                PendingIntent pi = sbn.getNotification().contentIntent;
-                if (pi != null) {
-                    try { pi.send(); } catch (PendingIntent.CanceledException ignored) { }
-                } else launchPackage(sbn.getPackageName());
-            });
+            item.setOnClickListener(v -> open(app));
+            count++;
         }
-        if (notifications.isEmpty()) add(main, text("All clear. Enjoy the silence.", 16, muted, false), 25);
+        if (count == 0) add(main, text("No messaging apps found.", 14, muted, false), 18);
+        space(main, 16);
+        add(main, text("For incoming alerts, use Android's regular notification shade.", 12, muted, false), 8);
     }
 
     private void renderUsage() {
@@ -558,12 +542,11 @@ public final class MainActivity extends Activity {
         setting("Distracting apps", "Add a moment of intention before launching", () -> selectApps("distracting", "Distracting apps"));
         section(main, "ACCESS", null, null);
         setting("Screen time permission", hasUsage ? "On" : "Off · tap to enable", () -> startSafe(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)));
-        setting("Notification permission", notificationsEnabled() ? "On" : "Off · tap to enable", () -> startSafe(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
         setting("Manage Android widgets", "Choose useful home widgets", () -> show("widgets"));
         section(main, "ABOUT", null, null);
         LinearLayout about = card();
-        add(about, text("Quiet 0.1 — privacy-first launcher", 14, ink, true), 0);
-        add(about, text("Offline by default. No subscription, account, analytics or ad SDK. App hiding and protection only apply inside Quiet.", 12, muted, false), 8);
+        add(about, text("Quiet 0.1.1 — direct-install edition", 14, ink, true), 0);
+        add(about, text("Offline by default. No subscription, account, analytics or ad SDK. Notifications are handled by Android. App hiding and protection only apply inside Quiet.", 12, muted, false), 8);
         add(main, about, 10); space(main, 25);
     }
 
@@ -864,12 +847,6 @@ public final class MainActivity extends Activity {
         return minutes + "m";
     }
     private String durationShort(long time) { return duration(time); }
-    private boolean notificationsEnabled() {
-        try {
-            String listeners = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
-            return listeners != null && listeners.contains(getPackageName());
-        } catch (Exception ignored) { return false; }
-    }
     private void startSafe(Intent intent) {
         try { startActivity(intent); }
         catch (Exception e) { Toast.makeText(this, "No app available for that action", Toast.LENGTH_SHORT).show(); }
