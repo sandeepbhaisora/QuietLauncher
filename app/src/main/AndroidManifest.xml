@@ -13,6 +13,8 @@
         android:allowBackup="false" android:supportsRtl="true"
         android:theme="@style/AppTheme">
         <activity android:name=".TrainingActivity" android:exported="false"/>
+        <activity android:name=".LondeActivity" android:exported="false"
+            android:windowSoftInputMode="adjustResize"/>
         <activity android:name=".WorkspaceActivity"
             android:label="Open in Quiet"
             android:exported="true"

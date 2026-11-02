@@ -117,11 +117,13 @@ public final class LondeActivity extends Activity {
         actionParams.topMargin=dp(8);
         TextView voice=control("🎙  SPEAK",this::voice);
         actions.addView(voice,new LinearLayout.LayoutParams(0,-1,1));
+        final TextView[] readRef = new TextView[1];
         TextView read=control("🔊  READ: OFF",()->{
             speakReplies=!speakReplies;
             if(!speakReplies&&speech!=null)speech.stop();
-            read.setText(speakReplies?"🔊  READ: ON":"🔊  READ: OFF");
+            readRef[0].setText(speakReplies?"🔊  READ: ON":"🔊  READ: OFF");
         });
+        readRef[0]=read;
         LinearLayout.LayoutParams middle=new LinearLayout.LayoutParams(0,-1,1);
         middle.leftMargin=dp(6);actions.addView(read,middle);
         TextView doAction=control("DO  ↗",this::requestAction);
