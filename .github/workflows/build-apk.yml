@@ -68,9 +68,9 @@ jobs:
           echo "QUIET_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
           echo "QUIET_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "QUIET_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+      - name: Set increasing build version
+        run: echo "QUIET_VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
       - name: Assemble installable debug APK
-        env:
-          QUIET_VERSION_CODE: ${{ github.run_number + 1000 }}
         run: gradle --no-daemon :app:assembleDebug
       - name: Delete temporary keystore
         if: always()
