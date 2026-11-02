@@ -328,7 +328,7 @@ public final class TrainingActivity extends Activity {
         restRow.addView(restClock, new LinearLayout.LayoutParams(0, -2, 1));
         restRow.addView(action("START REST", () -> {
             prefs.edit().putLong("rest_until", System.currentTimeMillis() + restSeconds() * 1000L).apply();
-            ticker.run();
+            if (restClock != null) restClock.setText("Rest  " + (restSeconds() / 60) + ":" + String.format(Locale.US, "%02d", restSeconds() % 60));
         }));
         add(target, restRow, 17);
 
