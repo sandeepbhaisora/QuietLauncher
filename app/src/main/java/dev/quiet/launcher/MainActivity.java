@@ -922,7 +922,8 @@ public final class MainActivity extends Activity {
                     if(voiceReady && londeSpeech!=null){
                         londeSpeaking=true;
                         int started=londeSpeech.speak(
-                            SpeechTextCleaner.clean(result.text.length()>600?result.text.substring(0,600):result.text),
+                            HindiSpeech.prepare(result.text.length()>600?result.text.substring(0,600):result.text,
+                                londeSpeech.getVoice()!=null?londeSpeech.getVoice().getLocale():Locale.getDefault()),
                             TextToSpeech.QUEUE_FLUSH,null,"londe-answer-"+SystemClock.uptimeMillis());
                         if(started==TextToSpeech.ERROR){
                             londeSpeaking=false;
