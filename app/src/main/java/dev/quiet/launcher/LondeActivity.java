@@ -330,7 +330,8 @@ public final class LondeActivity extends Activity {
     }
     private void say(String value) {
         if (!readAloud || !speechReady) return;
-        String spoken=SpeechTextCleaner.clean(value.length()>750 ? value.substring(0,750)+"…" : value);
+        String spoken=HindiSpeech.prepare(value.length()>750 ? value.substring(0,750)+"…" : value,
+                speech.getVoice()!=null?speech.getVoice().getLocale():java.util.Locale.getDefault());
         speech.speak(spoken,TextToSpeech.QUEUE_FLUSH,null,"londe-"+SystemClock.uptimeMillis());
     }
     private void showAnswer(String result) {
