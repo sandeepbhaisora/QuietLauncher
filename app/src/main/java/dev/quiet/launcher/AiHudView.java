@@ -16,9 +16,29 @@ public final class AiHudView extends View {
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         float w=getWidth(), h=getHeight(), cx=w/2f, cy=h/2f;
-        float r=Math.min(w,h)*.32f;
+        float r=Math.min(w,h)*.33f;
         float t=animate ? (android.os.SystemClock.uptimeMillis()-start)/1000f : 0;
         canvas.drawColor(Color.TRANSPARENT);
+        // Radar ticks and orbit markers make the AI core read as a full HUD.
+        paint.setStyle(Paint.Style.STROKE);
+        for (int i=0;i<48;i++) {
+            double angle=(i*7.5+t*4)*Math.PI/180.0;
+            float inner=r*(i%4==0?1.38f:1.44f);
+            float outer=r*1.52f;
+            paint.setStrokeWidth(i%4==0?2.2f:1f);
+            paint.setColor(Color.argb(i%4==0?145:60,67,222,250));
+            canvas.drawLine(cx+(float)Math.cos(angle)*inner,
+                    cy+(float)Math.sin(angle)*inner,
+                    cx+(float)Math.cos(angle)*outer,
+                    cy+(float)Math.sin(angle)*outer,paint);
+        }
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(Color.argb(110,70,220,250));
+        for(int i=0;i<4;i++){
+            double orbit=t*(.20+i*.08)+i*Math.PI/2.0;
+            canvas.drawCircle(cx+(float)Math.cos(orbit)*r*1.25f,
+                    cy+(float)Math.sin(orbit)*r*1.25f,2.5f,paint);
+        }
         paint.setStyle(Paint.Style.STROKE);
         for(int i=0;i<3;i++){
             float rr=r*(.8f+i*.22f);
