@@ -832,23 +832,31 @@ public final class MainActivity extends Activity {
     private void selectLondeVoice(){
         if(londeSpeech==null||!voiceReady)return;
         List<android.speech.tts.Voice> voices=new ArrayList<>();
+        // Do not filter by the phone's language. Kokoro exposes Hindi voices
+        // even when the Samsung system locale is English.
         if(londeSpeech.getVoices()!=null)
-            for(android.speech.tts.Voice v:londeSpeech.getVoices())
-                if(v.getLocale().getLanguage().equals(Locale.getDefault().getLanguage()))
-                    voices.add(v);
+            voices.addAll(londeSpeech.getVoices());
+        voices.sort((a,b)->{
+            boolean aHindi="hi".equals(a.getLocale().getLanguage());
+            boolean bHindi="hi".equals(b.getLocale().getLanguage());
+            if(aHindi!=bHindi)return aHindi?-1:1;
+            return a.getName().compareToIgnoreCase(b.getName());
+        });
         if(voices.isEmpty()){
-            Toast.makeText(this,"No voices installed for this language",Toast.LENGTH_LONG).show();
+            Toast.makeText(this,"Selected TTS engine returned no voices. Check downloaded voices in the engine app.",Toast.LENGTH_LONG).show();
             return;
         }
         String[] labels=new String[voices.size()];
-        for(int i=0;i<labels.length;i++)labels[i]=voices.get(i).getName();
+        for(int i=0;i<labels.length;i++)labels[i]=voices.get(i).getName()+" · "+voices.get(i).getLocale().toLanguageTag();
         new AlertDialog.Builder(this).setTitle("Choose voice")
             .setItems(labels,(d,index)->{
                 android.speech.tts.Voice chosen=voices.get(index);
                 londeSpeech.setVoice(chosen);
                 getSharedPreferences("londe_voice_v1",MODE_PRIVATE).edit()
                     .putString("tts_voice",chosen.getName()).apply();
-                londeSpeech.speak("Haan bhai, main Londe hoon. Kaisa laga?",
+                londeSpeech.speak("hi".equals(chosen.getLocale().getLanguage())
+                    ? "हाँ भाई, मैं लोंडे हूँ। बताओ क्या करना है?"
+                    : "Hi, I'm Londe. How does this voice sound?",
                     TextToSpeech.QUEUE_FLUSH,null,"voice-preview");
             }).setNegativeButton("Cancel",null).show();
     }
