@@ -15,6 +15,34 @@ import java.util.List;
 /** Uses an explicitly authorized ChatGPT subscription inference token. */
 final class ChatGptPlanner {
     private ChatGptPlanner() {}
+    private static String availableModel(String token) throws Exception {
+        HttpURLConnection c = (HttpURLConnection)new URL("https://api.openai.com/v1/models")
+                .openConnection();
+        c.setInstanceFollowRedirects(false);
+        c.setConnectTimeout(10000);c.setReadTimeout(15000);
+        c.setRequestProperty("Authorization","Bearer "+token);
+        try {
+            if(c.getResponseCode()!=200)throw new IllegalStateException("Model catalog unavailable");
+            JSONObject listing;
+            try(InputStream input=c.getInputStream();
+                ByteArrayOutputStream out=new ByteArrayOutputStream()) {
+                byte[] buf=new byte[4096];int n;
+                while((n=input.read(buf))!=-1){
+                    if(out.size()+n>262144)throw new IllegalStateException("Catalog too large");
+                    out.write(buf,0,n);
+                }
+                listing=new JSONObject(out.toString("UTF-8"));
+            }
+            JSONArray models=listing.getJSONArray("models");
+            for(int i=0;i<models.length();i++){
+                JSONObject m=models.getJSONObject(i);
+                if("list".equals(m.optString("visibility"))&&!m.optString("slug").isEmpty())
+                    return m.getString("slug");
+            }
+            throw new IllegalStateException("No available ChatGPT models");
+        }finally{c.disconnect();}
+    }
+
     static List<IntentRouter.Step> plan(Context context, String command) throws Exception {
         if (command == null || command.trim().isEmpty() || command.length() > 220)
             throw new IllegalArgumentException("Command must be 1-220 characters");
@@ -37,9 +65,9 @@ final class ChatGptPlanner {
             .put("properties",new JSONObject().put("steps",
                 new JSONObject().put("type","array").put("items",step)));
         JSONObject request = new JSONObject()
-            .put("model","gpt-5.1-codex-mini")
+            .put("model",availableModel(bearer))
             .put("store",false)
-            .put("max_output_tokens",650)
+            .put("stream",true)
             .put("instructions","You map user requests to Android launcher actions. " +
                 "Allowed actions are in the provided schema. All irrelevant properties are 0 or empty strings. "+
                 "At most 3 actions, at most one app/screen opening action. " +
@@ -69,29 +97,33 @@ final class ChatGptPlanner {
             int responseCode=connection.getResponseCode();
             if(responseCode!=200) throw new IllegalStateException(
                 "ChatGPT inference unavailable (HTTP "+responseCode+")");
-            JSONObject response;
-            try(InputStream stream=connection.getInputStream();
-                ByteArrayOutputStream output=new ByteArrayOutputStream()) {
-                byte[] block=new byte[4096];int count;
-                while((count=stream.read(block))!=-1) {
-                    if(output.size()+count>262144) throw new IllegalStateException("Response too large");
-                    output.write(block,0,count);
-                }
-                response=new JSONObject(output.toString("UTF-8"));
-            }
-            JSONArray messages=response.getJSONArray("output");
-            String raw=null;
-            for(int i=0;i<messages.length()&&raw==null;i++) {
-                JSONArray content=messages.getJSONObject(i).optJSONArray("content");
-                if(content==null)continue;
-                for(int j=0;j<content.length();j++) {
-                    JSONObject part=content.getJSONObject(j);
-                    if("output_text".equals(part.optString("type"))) {
-                        raw=part.getString("text");break;
+            StringBuilder outputText = new StringBuilder();
+            boolean completed = false;
+            try (InputStream stream = connection.getInputStream();
+                 java.io.BufferedReader reader = new java.io.BufferedReader(
+                     new java.io.InputStreamReader(stream, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (!line.startsWith("data: ")) continue;
+                    String data = line.substring(6);
+                    if ("[DONE]".equals(data)) break;
+                    JSONObject event = new JSONObject(data);
+                    String type = event.optString("type", "");
+                    if ("response.output_text.delta".equals(type)) {
+                        outputText.append(event.optString("delta"));
+                        if (outputText.length() > 18000)
+                            throw new IllegalStateException("AI response too large");
+                    } else if ("response.completed".equals(type)) {
+                        completed = true;
+                    } else if ("response.failed".equals(type) ||
+                            "response.incomplete".equals(type) || "error".equals(type)) {
+                        throw new IllegalStateException("AI request did not complete");
                     }
                 }
             }
-            if(raw==null)throw new IllegalStateException("Model returned no plan");
+            if (!completed || outputText.length() == 0)
+                throw new IllegalStateException("Incomplete AI response");
+            String raw = outputText.toString();
             JSONArray actions=new JSONObject(raw).getJSONArray("steps");
             if(actions.length()<1||actions.length()>3)
                 throw new IllegalStateException("Unexpected action count");
