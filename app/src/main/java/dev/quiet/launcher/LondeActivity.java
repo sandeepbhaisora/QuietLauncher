@@ -90,7 +90,7 @@ public final class LondeActivity extends Activity {
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
                 | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
         createConsole();
-        selectedEngine=getPreferences(MODE_PRIVATE).getString("tts_engine","");
+        selectedEngine=getSharedPreferences("londe_voice_v1",MODE_PRIVATE).getString("tts_engine","");
         initSpeech();
         if (getIntent() != null && getIntent().getBooleanExtra("auto_listen", false))
             ui.postDelayed(this::listen, 450);
@@ -109,7 +109,7 @@ public final class LondeActivity extends Activity {
                     @Override public void onDone(String id){ui.post(()->voiceFinished());}
                     @Override public void onError(String id){ui.post(()->voiceFinished());}
                 });
-                String preferred=getPreferences(MODE_PRIVATE).getString("tts_voice","");
+                String preferred=getSharedPreferences("londe_voice_v1",MODE_PRIVATE).getString("tts_voice","");
                 if(!preferred.isEmpty() && speech.getVoices()!=null)
                     for(Voice v:speech.getVoices())if(preferred.equals(v.getName())){
                         speech.setVoice(v);break;
@@ -126,12 +126,19 @@ public final class LondeActivity extends Activity {
         java.util.List<String> ids=new java.util.ArrayList<>();
         labels.add("Choose installed voice");ids.add("voices");
         labels.add("Change speech engine");ids.add("engine");
-        labels.add("Install or configure system voices");ids.add("settings");
+        labels.add("Install free offline neural voices (Marmalade)");ids.add("install");
+        labels.add("Configure Android voice settings");ids.add("settings");
         new AlertDialog.Builder(this).setTitle("Londe voice")
             .setItems(labels.toArray(new String[0]),(d,w)->{
                 if(w==0)pickVoice();
                 else if(w==1)pickEngine();
-                else {
+                else if(w==2){
+                    try {
+                        Intent install=new Intent(Intent.ACTION_VIEW,
+                            android.net.Uri.parse("https://f-droid.org/packages/app.marmalade.tts/"));
+                        startActivity(install);
+                    }catch(Exception e){toast("Open f-droid.org/packages/app.marmalade.tts/");}
+                } else {
                     try{startActivity(new Intent("com.android.settings.TTS_SETTINGS"));}
                     catch(Exception e){toast("Open Settings > Text-to-speech output");}
                 }
@@ -145,7 +152,7 @@ public final class LondeActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("Speech engine")
             .setItems(labels,(d,index)->{
                 selectedEngine=engines.get(index).name;
-                getPreferences(MODE_PRIVATE).edit().putString("tts_engine",selectedEngine)
+                getSharedPreferences("londe_voice_v1",MODE_PRIVATE).edit().putString("tts_engine",selectedEngine)
                     .remove("tts_voice").apply();
                 if(activeSession)listen();
                 initSpeech();
@@ -169,7 +176,7 @@ public final class LondeActivity extends Activity {
             .setItems(labels,(d,index)->{
                 Voice v=voices.get(index);
                 speech.setVoice(v);
-                getPreferences(MODE_PRIVATE).edit().putString("tts_voice",v.getName()).apply();
+                getSharedPreferences("londe_voice_v1",MODE_PRIVATE).edit().putString("tts_voice",v.getName()).apply();
                 if(activeSession)listen();
                 say("Hi, I'm Londe. How does this voice sound?");
             }).setNegativeButton("Cancel",null).show();
