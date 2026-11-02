@@ -5,6 +5,7 @@ import android.app.SearchManager;
 import android.speech.RecognizerIntent;
 import android.Manifest;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.content.ActivityNotFoundException;
 import android.app.AlertDialog;
 import android.app.AppOpsManager;
@@ -119,6 +120,9 @@ public final class MainActivity extends Activity {
     private boolean voiceReady, replyBusy;
     private String recentReply="Say Hey Londe to ask or command.";
     private String wakeState="VOICE WAKE OFF";
+    private String wakeLastHeard="LAST HEARD · NONE";
+    private TextView londeHeard;
+    private boolean londeSpeaking;
     private String assistantModel="";
     private final List<LondeClient.Turn> homeContext=new ArrayList<>();
 
@@ -146,8 +150,21 @@ public final class MainActivity extends Activity {
         widgetManager = AppWidgetManager.getInstance(this);
         widgetHost = new AppWidgetHost(this, WIDGET_HOST_ID);
         setPalette();
-        londeSpeech=new TextToSpeech(this,code->{voiceReady=code==TextToSpeech.SUCCESS;
-            if(voiceReady)londeSpeech.setLanguage(Locale.getDefault());});
+        londeSpeech=new TextToSpeech(this,code->{
+            voiceReady=code==TextToSpeech.SUCCESS;
+            if(voiceReady){
+                londeSpeech.setLanguage(Locale.getDefault());
+                londeSpeech.setOnUtteranceProgressListener(new UtteranceProgressListener(){
+                    @Override public void onStart(String id){}
+                    @Override public void onDone(String id){
+                        handler.post(()->voiceCompleted(id));
+                    }
+                    @Override public void onError(String id){
+                        handler.post(()->voiceCompleted(id));
+                    }
+                });
+            }
+        });
         render();
         refreshAsync();
         if(getIntent()!=null){
@@ -234,6 +251,8 @@ public final class MainActivity extends Activity {
     @Override protected void onPause() {
         foregroundHome=false;
         stopWake();
+        if(londeSpeech!=null)londeSpeech.stop();
+        londeSpeaking=false;
         ChatGptAuth.onLauncherPaused();
         super.onPause();
     }
@@ -477,6 +496,8 @@ public final class MainActivity extends Activity {
         add(aiPanel,londeStatus,6);
         londeReply=text(recentReply,15,ink,false);
         add(aiPanel,londeReply,9);
+        londeHeard=text(wakeLastHeard,11,muted,false);
+        add(aiPanel,londeHeard,7);
         TextView inputHint=pill("ASK LONDE HERE  ↗",()->{
             EditText question=new EditText(this);
             question.setSingleLine(false);
@@ -750,6 +771,39 @@ public final class MainActivity extends Activity {
                 else{show("home");startWakeIfAllowed();}
             }).show();
     }
+    private void voiceCompleted(String id){
+        londeSpeaking=false;
+        if(id!=null && id.startsWith("londe-wake")){
+            if(homeWake!=null)homeWake.resumeAfterAcknowledgement();
+        } else if(id!=null && id.startsWith("londe-answer")){
+            handler.postDelayed(this::startWakeIfAllowed,450);
+        }
+    }
+    private void acknowledgeWake(){
+        wakeStatus("HEY LONDE DETECTED · SPEAK AFTER MY REPLY");
+        recentReply="Londe: Haan, bolo! I'm listening for your question.";
+        if(londeReply!=null)londeReply.setText(recentReply);
+        if(voiceReady && londeSpeech!=null){
+            londeSpeaking=true;
+            int result=londeSpeech.speak("Haan, bolo.",TextToSpeech.QUEUE_FLUSH,null,
+                "londe-wake-"+SystemClock.uptimeMillis());
+            if(result==TextToSpeech.ERROR){
+                londeSpeaking=false;
+                handler.postDelayed(()->{
+                    if(homeWake!=null)homeWake.resumeAfterAcknowledgement();
+                },600);
+            }
+        }else handler.postDelayed(()->{
+            if(homeWake!=null)homeWake.resumeAfterAcknowledgement();
+        },500);
+    }
+    private void updateWakeHeard(String heard, boolean completed){
+        if(heard==null||heard.trim().isEmpty())return;
+        String shortText=heard.trim();
+        if(shortText.length()>100)shortText=shortText.substring(0,100)+"…";
+        wakeLastHeard=(completed?"LAST HEARD · ":"HEARING · ")+shortText;
+        if(londeHeard!=null)londeHeard.setText(wakeLastHeard);
+    }
     private void wakeStatus(String value){
         wakeState=value;
         if(londeStatus!=null)londeStatus.setText(value);
@@ -760,13 +814,19 @@ public final class MainActivity extends Activity {
         wakeStatus("VOICE WAKE OFF");
     }
     private void startWakeIfAllowed(){
-        if(!foregroundHome||!"home".equals(page)||replyBusy||
+        if(!foregroundHome||!"home".equals(page)||replyBusy||londeSpeaking||
            !prefs.getBoolean("londe_wake_enabled",false))return;
         if(homeWake!=null&&homeWake.isRunning())return;
         homeWake=new HomeWakeListener(this,new HomeWakeListener.Callbacks(){
             @Override public void onState(String state){wakeStatus(state);}
-            @Override public void onWake(){wakeStatus("LONDE IS LISTENING");}
-            @Override public void onRequest(String req){homeAsk(req);}
+            @Override public void onWake(){acknowledgeWake();}
+            @Override public void onHeard(String heard,boolean complete){
+                updateWakeHeard(heard,complete);
+            }
+            @Override public void onRequest(String req){
+                updateWakeHeard(req,true);
+                homeAsk(req);
+            }
             @Override public void onUnavailable(String error){
                 wakeStatus("WAKE UNAVAILABLE");
                 if(londeReply!=null)londeReply.setText(error);
@@ -812,10 +872,16 @@ public final class MainActivity extends Activity {
                     recentReply="You: "+q+"\\n\\nLonde: "+result.text;
                     if(londeReply!=null)londeReply.setText(recentReply);
                     wakeStatus("LONDE REPLIED");
-                    if(voiceReady && londeSpeech!=null)londeSpeech.speak(
-                        result.text.length()>600?result.text.substring(0,600):result.text,
-                        TextToSpeech.QUEUE_FLUSH,null,"londe-home");
-                    handler.postDelayed(this::startWakeIfAllowed,1400);
+                    if(voiceReady && londeSpeech!=null){
+                        londeSpeaking=true;
+                        int started=londeSpeech.speak(
+                            result.text.length()>600?result.text.substring(0,600):result.text,
+                            TextToSpeech.QUEUE_FLUSH,null,"londe-answer-"+SystemClock.uptimeMillis());
+                        if(started==TextToSpeech.ERROR){
+                            londeSpeaking=false;
+                            handler.postDelayed(this::startWakeIfAllowed,700);
+                        }
+                    } else handler.postDelayed(this::startWakeIfAllowed,700);
                 });
             }catch(Exception e){
                 handler.post(()->{
