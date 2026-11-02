@@ -44,6 +44,7 @@ public final class WorkspaceActivity extends Activity {
     private static final int MAX_CHARS = 24000;
     private static final int MAX_FILE_BYTES = 64000;
     private static final String PREFS = "quiet_workspace_v1";
+    private static final int OPEN_TEXT_FILE = 303;
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -57,6 +58,19 @@ public final class WorkspaceActivity extends Activity {
     private LinearLayout body;
     private boolean loading;
     private long documentVersion;
+    private int focusedStart = -1;
+    private int focusedEnd = -1;
+    private String focusedTitle = "";
+
+    private static final class Outline {
+        final String title;
+        final int start;
+        int end;
+        Outline(String title, int start) {
+            this.title = title;
+            this.start = start;
+        }
+    }
 
     @Override public void onCreate(Bundle state) {
         SharedPreferences launcher = getSharedPreferences("quiet_local_v1", MODE_PRIVATE);
@@ -71,6 +85,9 @@ public final class WorkspaceActivity extends Activity {
             sourceLabel = state.getString("workspace.label", "New workspace");
             link = state.getString("workspace.link", "");
             truncated = state.getBoolean("workspace.truncated", false);
+            focusedStart = state.getInt("workspace.focus.start", -1);
+            focusedEnd = state.getInt("workspace.focus.end", -1);
+            focusedTitle = state.getString("workspace.focus.title", "");
         } else {
             loadIntent(getIntent(), true);
         }
@@ -92,6 +109,9 @@ public final class WorkspaceActivity extends Activity {
         out.putString("workspace.label", sourceLabel);
         out.putString("workspace.link", link);
         out.putBoolean("workspace.truncated", truncated);
+        out.putInt("workspace.focus.start", focusedStart);
+        out.putInt("workspace.focus.end", focusedEnd);
+        out.putString("workspace.focus.title", focusedTitle);
     }
 
     @Override protected void onDestroy() {
@@ -110,36 +130,10 @@ public final class WorkspaceActivity extends Activity {
                 accept(String.valueOf(shared), "Shared from another app");
                 return;
             }
-            // Some apps send .txt or code files as content URIs.
             Uri stream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
             if (stream != null && "content".equalsIgnoreCase(stream.getScheme())
-                    && intent.getType() != null && intent.getType().startsWith("text/")) {
-                final long generation = ++documentVersion;
-                loading = true;
-                text = "";
-                sourceLabel = "Reading shared text...";
-                io.execute(() -> {
-                    String result = null;
-                    try (InputStream input = getContentResolver().openInputStream(stream)) {
-                        if (input != null) {
-                            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-                            byte[] buffer = new byte[4096];
-                            int count;
-                            while (bytes.size() <= MAX_FILE_BYTES
-                                    && (count = input.read(buffer)) != -1) bytes.write(buffer, 0, count);
-                            result = bytes.toString("UTF-8");
-                        }
-                    } catch (Exception ignored) { }
-                    final String loaded = result;
-                    handler.post(() -> {
-                        if (isFinishing() || isDestroyed() || generation != documentVersion) return;
-                        loading = false;
-                        if (loaded == null) accept("Could not read this shared text file.", "Open in Quiet");
-                        else accept(loaded, "Shared text file");
-                        page = "overview";
-                        render();
-                    });
-                });
+                    && intent.getType() != null && isTextMime(intent.getType())) {
+                readTextUri(stream, "Shared text file");
                 return;
             }
             accept("This version supports shared text and links. Share text from another app to get started.",
@@ -157,6 +151,9 @@ public final class WorkspaceActivity extends Activity {
     private void accept(String value, String from) {
         ++documentVersion;
         loading = false;
+        focusedStart = -1;
+        focusedEnd = -1;
+        focusedTitle = "";
         truncated = value.length() > MAX_CHARS;
         text = truncated ? value.substring(0, MAX_CHARS) : value;
         sourceLabel = from;
@@ -178,6 +175,174 @@ public final class WorkspaceActivity extends Activity {
                     }
                 } catch (Exception ignored) { }
             }
+        }
+    }
+
+
+    private boolean isTextMime(String mime) {
+        return mime.startsWith("text/") || mime.equals("application/json")
+                || mime.equals("application/xml") || mime.equals("application/javascript");
+    }
+
+    private void openTextFile() {
+        Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        pick.setType("*/*");
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        pick.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                "text/plain", "text/markdown", "text/x-java", "text/x-python",
+                "text/*", "application/json", "application/xml", "application/javascript"});
+        try {
+            startActivityForResult(pick, OPEN_TEXT_FILE);
+        } catch (Exception e) {
+            toast("No document picker available");
+        }
+    }
+
+    @Override protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request == OPEN_TEXT_FILE && result == RESULT_OK && data != null
+                && data.getData() != null) {
+            readTextUri(data.getData(), "Selected text file");
+            page = "overview";
+            render();
+        }
+    }
+
+    private void readTextUri(Uri uri, String from) {
+        final long generation = ++documentVersion;
+        loading = true;
+        text = "";
+        link = "";
+        focusedStart = -1;
+        sourceLabel = "Reading text file...";
+        io.execute(() -> {
+            String loaded = null;
+            try (InputStream input = getContentResolver().openInputStream(uri)) {
+                if (input != null) {
+                    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+                    byte[] buffer = new byte[4096];
+                    int amount;
+                    while ((amount = input.read(buffer)) != -1) {
+                        int remaining = MAX_FILE_BYTES + 1 - bytes.size();
+                        if (remaining <= 0) break;
+                        bytes.write(buffer, 0, Math.min(remaining, amount));
+                        if (bytes.size() > MAX_FILE_BYTES) break;
+                    }
+                    loaded = bytes.toString("UTF-8");
+                }
+            } catch (Exception ignored) { }
+            final String result = loaded;
+            handler.post(() -> {
+                if (isFinishing() || isDestroyed() || generation != documentVersion) return;
+                if (result == null) accept("", "Unable to read this file");
+                else accept(result, from);
+                page = "overview";
+                render();
+            });
+        });
+    }
+
+    private String kind() {
+        if (text.isEmpty()) return "Empty";
+        String value = text.trim();
+        if (value.contains("public class ") || value.contains("interface ")
+                || value.contains("import java.") || value.startsWith("package ")
+                || value.contains("\nclass ") || value.startsWith("class ")
+                || value.contains("function ") || value.contains("def ")
+                || (value.contains("const ") && value.contains("=>")))
+            return "Code";
+        if (!link.isEmpty() && value.length() < 800 && value.split("\\n").length <= 4)
+            return "Link";
+        if (value.startsWith("# ") || value.startsWith("## ")
+                || value.contains("\n# ") || value.contains("\n## "))
+            return "Document";
+        return "Text";
+    }
+
+    private List<Outline> outline() {
+        List<Outline> all = new ArrayList<>();
+        String type = kind();
+        if (!type.equals("Code") && !type.equals("Document")) return all;
+        String[] lines = text.split("\\n", -1);
+        int offset = 0;
+        for (String line : lines) {
+            if (all.size() < 18) {
+                String item = outlineLabel(line, type);
+                if (item != null) all.add(new Outline(item, offset));
+            }
+            offset += line.length() + 1;
+        }
+        for (int i = 0; i < all.size(); i++) {
+            int next = i + 1 == all.size() ? text.length() : all.get(i + 1).start;
+            all.get(i).end = Math.max(all.get(i).start, Math.min(next, all.get(i).start + 2800));
+        }
+        return all;
+    }
+
+    private String outlineLabel(String original, String type) {
+        String line = original.trim();
+        if (type.equals("Document")) {
+            if (!line.startsWith("#")) return null;
+            int index = 0;
+            while (index < line.length() && line.charAt(index) == '#') index++;
+            if (index == 0 || index > 5 || index >= line.length() || line.charAt(index) != ' ') return null;
+            String result = line.substring(index).trim();
+            return result.length() > 90 ? result.substring(0, 90) : result;
+        }
+        if (line.startsWith("//") || line.startsWith("*") || line.startsWith("@")) return null;
+        if (line.startsWith("class ") || line.startsWith("public class ")
+                || line.startsWith("interface ") || line.startsWith("public interface ")
+                || line.startsWith("record ") || line.startsWith("public record ")
+                || line.startsWith("enum ") || line.startsWith("public enum ")
+                || line.startsWith("def ") || line.startsWith("async def ")
+                || line.startsWith("function ") || line.startsWith("export function ")
+                || line.startsWith("fun ")) {
+            return line.length() > 95 ? line.substring(0, 95) + "…" : line;
+        }
+        boolean signature = line.startsWith("public ") || line.startsWith("protected ")
+                || line.startsWith("private ") || line.startsWith("static ");
+        if (signature && line.contains("(") && line.contains(")")
+                && !line.endsWith(";") && !line.contains(" = new ")) {
+            return line.length() > 95 ? line.substring(0, 95) + "…" : line;
+        }
+        return null;
+    }
+
+    private String focusedContent() {
+        if (focusedStart < 0 || focusedEnd <= focusedStart || focusedEnd > text.length()) return text;
+        return text.substring(focusedStart, focusedEnd);
+    }
+
+    private void focus(Outline item) {
+        focusedStart = item.start;
+        focusedEnd = item.end;
+        focusedTitle = item.title;
+        page = "content";
+        render();
+    }
+
+    private void renderOutline() {
+        List<Outline> sections = outline();
+        if (sections.isEmpty()) {
+            cardText("No sections detected", "You can still open the full content, copy it or edit it.");
+            return;
+        }
+        add(body, label("JUMP TO " + (kind().equals("Code") ? "SYMBOL" : "SECTION"), 11, true), 22);
+        for (Outline section : sections) {
+            LinearLayout cell = row();
+            cell.setPadding(dp(13), dp(14), dp(13), dp(14));
+            cell.setBackground(shape(surface, true));
+            TextView name = label(section.title, 13, true);
+            cell.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView arrow = label("›", 20, false);
+            cell.addView(arrow);
+            add(body, cell, 8);
+            cell.setOnClickListener(v -> focus(section));
+        }
+        if (sections.size() == 18) {
+            TextView note = label("Showing the first 18 detected sections", 12, false);
+            note.setTextColor(secondary);
+            add(body, note, 9);
         }
     }
 
