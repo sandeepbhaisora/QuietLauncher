@@ -172,6 +172,8 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        // Browser-based ChatGPT OAuth completes only after Quiet becomes active again.
+        ChatGptAuth.onLauncherResumed();
         if (initialResumePending) {
             initialResumePending = false;
             return;
