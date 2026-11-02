@@ -757,20 +757,13 @@ public final class MainActivity extends Activity {
     }
 
     private void configureWake(){
-        boolean enabled=prefs.getBoolean("londe_wake_enabled",false);
-        new AlertDialog.Builder(this).setTitle("Hey Londe")
-            .setMessage("Experimental wake listening works only while Quiet Home is on screen. It uses Android's on-device speech recognition; audio stays with your phone's recognizer. It may use battery and may be unavailable on some phones. No screen-off or background listening.")
-            .setNegativeButton("Cancel",null)
-            .setNeutralButton("Disable",(d,w)->{
-                prefs.edit().putBoolean("londe_wake_enabled",false).apply();
-                stopWake();render();
-            })
-            .setPositiveButton(enabled?"Keep enabled":"Enable",(d,w)->{
-                prefs.edit().putBoolean("londe_wake_enabled",false).apply();
-                if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
-                    requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQ_WAKE_MIC);
-                else{show("home");startWakeIfAllowed();}
-            }).show();
+        prefs.edit().putBoolean("londe_wake_enabled",false).apply();
+        stopWake();
+        new AlertDialog.Builder(this)
+            .setTitle("Hey Londe")
+            .setMessage("Automatic Android/Google speech recognition has been disabled. A dedicated offline wake-word engine is required before hands-free voice activation can be safely enabled. You can still open the assistant manually.")
+            .setPositiveButton("OK",null)
+            .show();
     }
     private void initHomeVoice(){
         if(londeSpeech!=null){londeSpeech.stop();londeSpeech.shutdown();}
@@ -889,29 +882,10 @@ public final class MainActivity extends Activity {
         wakeStatus("VOICE WAKE OFF");
     }
     private void startWakeIfAllowed(){
-        // Fail closed: Android SpeechRecognizer is transcription, not a wake-word engine.
-        // This method must not launch it until a dedicated offline keyword detector exists.
+        // Android SpeechRecognizer is a transcription engine, not a hotword detector.
+        // Never launch it automatically on Home. Re-enable only after adding a
+        // dedicated local keyword engine with a verified wake callback.
         wakeStatus("WAKE DETECTOR NOT INSTALLED");
-        return;
-        /*if(!foregroundHome||!"home".equals(page)||replyBusy||londeSpeaking||
-           !prefs.getBoolean("londe_wake_enabled",false))return;
-        if(homeWake!=null&&homeWake.isRunning())return;
-        homeWake=new HomeWakeListener(this,new HomeWakeListener.Callbacks(){
-            @Override public void onState(String state){wakeStatus(state);}
-            @Override public void onWake(){acknowledgeWake();}
-            @Override public void onHeard(String heard,boolean complete){
-                updateWakeHeard(heard,complete);
-            }
-            @Override public void onRequest(String req){
-                updateWakeHeard(req,true);
-                homeAsk(req);
-            }
-            @Override public void onUnavailable(String error){
-                wakeStatus("WAKE UNAVAILABLE");
-                if(londeReply!=null)londeReply.setText(error);
-            }
-        });
-        homeWake.start();*/
     }
     private void homeAsk(String request){
         String q=request==null?"":request.trim();
