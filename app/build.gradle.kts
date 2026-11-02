@@ -8,8 +8,8 @@ android {
         applicationId = "dev.quiet.launcher"
         minSdk = 28
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.4.0"
+        versionCode = 9
+        versionName = "0.4.1"
     }
     buildTypes {
         release { isMinifyEnabled = false }

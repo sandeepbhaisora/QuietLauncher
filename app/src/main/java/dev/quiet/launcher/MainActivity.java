@@ -314,6 +314,7 @@ public final class MainActivity extends Activity {
         shell.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         switch (page) {
             case "home": renderHome(); break;
+            case "intent": renderIntent(); break;
             case "apps": renderApps(""); break;
             case "root": renderRoot(); break;
             case "inbox": renderInbox(); break;
@@ -354,6 +355,100 @@ public final class MainActivity extends Activity {
 
     private void openWorkspace() { startSafe(new Intent(this, WorkspaceActivity.class)); }
 
+    // An opt-in, keyboard-first concept screen. No fake AI outputs, microphone
+    // claims, network access, or additional permissions.
+    private void renderIntent() {
+        add(main, label("QUIET  /  INTENT PREVIEW"), 20);
+        add(main, text("What do you want\\nto do?", 33, ink, true), 12);
+        add(main, text("Less browsing. More doing.", 14, muted, false), 6);
+
+        LinearLayout faceCard = card();
+        faceCard.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout faceRow = row();
+        TextView face = text("◡‿◡", 38, ink, false);
+        face.setGravity(Gravity.CENTER);
+        face.setBackground(shape(accent, 4, 0));
+        faceRow.addView(face, new LinearLayout.LayoutParams(dp(92), dp(80)));
+        LinearLayout status = column();
+        status.setPadding(dp(18), 0, 0, 0);
+        add(status, text("Hello from Quiet.", 19, ink, true), 0);
+        add(status, text("Your tools, on your terms.", 12, muted, false), 8);
+        faceRow.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
+        faceCard.addView(faceRow);
+        add(main, faceCard, 21);
+
+        EditText command = new EditText(this);
+        command.setSingleLine(true);
+        command.setTextSize(15);
+        command.setTextColor(ink);
+        command.setHintTextColor(muted);
+        command.setHint("Try: train, focus 25, open WhatsApp");
+        command.setPadding(dp(13), dp(16), dp(13), dp(16));
+        command.setBackground(shape(surface, 4, line));
+        command.setImeOptions(EditorInfo.IME_ACTION_GO);
+        add(main, command, 18);
+        Runnable submit = () -> runIntentCommand(command.getText().toString());
+        command.setOnEditorActionListener((v, action, event) -> {
+            if (action == EditorInfo.IME_ACTION_GO) { submit.run(); return true; }
+            return false;
+        });
+        TextView submitButton = pill("RUN COMMAND  →", submit);
+        add(main, submitButton, 10);
+        add(main, text("Offline commands only. No AI model, microphone, or cloud processing.",
+                11, muted, false), 10);
+
+        section(main, "DO SOMETHING USEFUL", null, null);
+        LinearLayout first = row();
+        first.addView(intentAction("TRAIN", "A focused workout", this::openTraining),
+                new LinearLayout.LayoutParams(0, dp(108), 1));
+        spaceHorizontal(first, 9);
+        first.addView(intentAction("WORKSPACE", "Read or write", this::openWorkspace),
+                new LinearLayout.LayoutParams(0, dp(108), 1));
+        add(main, first, 10);
+
+        LinearLayout second = row();
+        second.addView(intentAction("FOCUS", "Protect your time", this::focusDialog),
+                new LinearLayout.LayoutParams(0, dp(108), 1));
+        spaceHorizontal(second, 9);
+        second.addView(intentAction("ALL APPS", "Open intentionally", () -> show("apps")),
+                new LinearLayout.LayoutParams(0, dp(108), 1));
+        add(main, second, 9);
+
+        section(main, "IN PROGRESS", null, null);
+        LinearLayout active = card();
+        add(active, text(focusActive() ? "Focus in progress" : "No active focus session",
+                17, ink, true), 0);
+        add(active, text(focusActive() ? remainingFocus() + " remaining" :
+                "Choose Focus to start a distraction-free session.", 12, muted, false), 7);
+        active.setOnClickListener(v -> focusDialog());
+        add(main, active, 10);
+        add(main, pill("← BACK TO HOME", () -> show("home")), 23);
+        space(main, 22);
+    }
+
+    private LinearLayout intentAction(String name, String subtitle, Runnable callback) {
+        LinearLayout tile = column();
+        tile.setPadding(dp(12), dp(15), dp(10), dp(12));
+        tile.setBackground(shape(surface, 4, line));
+        add(tile, text(name, 15, ink, true), 0);
+        add(tile, text(subtitle, 12, muted, false), 8);
+        tile.setOnClickListener(v -> callback.run());
+        return tile;
+    }
+
+    private void spaceHorizontal(LinearLayout row, int widthDp) {
+        row.addView(new View(this), new LinearLayout.LayoutParams(dp(widthDp), 1));
+    }
+
+    private void runIntentCommand(String input) {
+        String q = input.trim();
+        if (q.isEmpty()) return;
+        if (!handleCommand(q)) {
+            Toast.makeText(this, "Try: train, workspace, focus 25, apps, or open an app",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
     private void renderHome() {
         String hour = new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date());
         String day = new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(new Date());
@@ -362,6 +457,14 @@ public final class MainActivity extends Activity {
         clockLive = time;
         time.setLetterSpacing(-0.04f); add(main, time, 5);
         TextView headline = text("Less noise. More life.", 15, muted, false); add(main, headline, -3);
+
+        // Optional AI-style concept preview; local controls only, not an AI model.
+        LinearLayout intentPreview = card();
+        add(intentPreview, label("NEW  /  INTENT PREVIEW"), 0);
+        add(intentPreview, text("Do something, not everything.", 18, ink, true), 7);
+        add(intentPreview, text("One command bar · four purposeful tools · zero feed", 12, muted, false), 5);
+        intentPreview.setOnClickListener(v -> show("intent"));
+        add(main, intentPreview, 20);
 
         LinearLayout meter = row(); meter.setPadding(dp(15), dp(13), dp(15), dp(13));
         meter.setBackground(shape(surface, 20, line));
@@ -917,6 +1020,14 @@ public final class MainActivity extends Activity {
     }
     private boolean handleCommand(String input) {
         String q = input.toLowerCase(Locale.ROOT).trim();
+        if (q.equals("train") || q.equals("training") || q.equals("workout")
+                || q.equals("fitness")) { openTraining(); return true; }
+        if (q.equals("work") || q.equals("workspace") || q.equals("read")
+                || q.equals("summarize")) { openWorkspace(); return true; }
+        if (q.equals("apps") || q.equals("all apps")) { show("apps"); return true; }
+        if (q.equals("calendar")) { openCalendar(); return true; }
+        if (q.equals("settings")) { show("settings"); return true; }
+        if (q.equals("focus")) { focusDialog(); return true; }
         if (q.startsWith("focus ")) {
             try {
                 int mins = Integer.parseInt(q.substring(6).trim().replaceAll("[^0-9]", ""));
