@@ -206,7 +206,7 @@ public final class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] grants){
         super.onRequestPermissionsResult(request,permissions,grants);
         if(request==REQ_WAKE_MIC && grants.length>0 && grants[0]==PackageManager.PERMISSION_GRANTED)
-            {show("home");startWakeIfAllowed();}
+            {show("home");wakeStatus("WAKE DETECTOR NOT INSTALLED");}
         else if(request==REQ_WAKE_MIC){
             prefs.edit().putBoolean("londe_wake_enabled",false).apply();stopWake();
         }
@@ -240,7 +240,7 @@ public final class MainActivity extends Activity {
         // Browser-based ChatGPT OAuth completes only after Quiet becomes active again.
         ChatGptAuth.onLauncherResumed();
         foregroundHome=true;
-        handler.postDelayed(this::startWakeIfAllowed,400);
+        // Do not start Android SpeechRecognizer when the launcher becomes visible.
         if (initialResumePending) {
             initialResumePending = false;
             return;
@@ -370,7 +370,7 @@ public final class MainActivity extends Activity {
         add(view, r, 23);
     }
 
-    private void show(String next) { if (next.equals(page) && shell != null) return; if(!"home".equals(next))stopWake(); page = next; render(); if("home".equals(next))startWakeIfAllowed(); }
+    private void show(String next) { if (next.equals(page) && shell != null) return; if(!"home".equals(next))stopWake(); page = next; render(); // Wake requires a separate local keyword detector; never auto-launch speech recognition. }
     private void render() {
         if (prefs == null) return;
         setPalette(); focusLive = null; clockLive = null;
@@ -766,7 +766,7 @@ public final class MainActivity extends Activity {
                 stopWake();render();
             })
             .setPositiveButton(enabled?"Keep enabled":"Enable",(d,w)->{
-                prefs.edit().putBoolean("londe_wake_enabled",true).apply();
+                prefs.edit().putBoolean("londe_wake_enabled",false).apply();
                 if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
                     requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQ_WAKE_MIC);
                 else{show("home");startWakeIfAllowed();}
@@ -889,7 +889,11 @@ public final class MainActivity extends Activity {
         wakeStatus("VOICE WAKE OFF");
     }
     private void startWakeIfAllowed(){
-        if(!foregroundHome||!"home".equals(page)||replyBusy||londeSpeaking||
+        // Fail closed: Android SpeechRecognizer is transcription, not a wake-word engine.
+        // This method must not launch it until a dedicated offline keyword detector exists.
+        wakeStatus("WAKE DETECTOR NOT INSTALLED");
+        return;
+        /*if(!foregroundHome||!"home".equals(page)||replyBusy||londeSpeaking||
            !prefs.getBoolean("londe_wake_enabled",false))return;
         if(homeWake!=null&&homeWake.isRunning())return;
         homeWake=new HomeWakeListener(this,new HomeWakeListener.Callbacks(){
@@ -907,7 +911,7 @@ public final class MainActivity extends Activity {
                 if(londeReply!=null)londeReply.setText(error);
             }
         });
-        homeWake.start();
+        homeWake.start();*/
     }
     private void homeAsk(String request){
         String q=request==null?"":request.trim();
@@ -1723,7 +1727,7 @@ public final class MainActivity extends Activity {
         setting("Intent-first home", "Default home · local commands and recommendations", () -> show("home"));
         section(main, "LONDE ASSISTANT", null, null);
         setting("Voice wake: Hey Londe", prefs.getBoolean("londe_wake_enabled",false)
-            ? "Enabled on Home (foreground only)" : "Off · opt-in on-device recognition",
+            ? "Unavailable until offline detector is installed" : "Off · full speech detection disabled",
             () -> configureWake());
         setting("Londe voice engine", "Choose offline voice · free neural TTS option", this::configureLondeVoice);
         setting("Londe assistant", "Voice-first assistant · answers and device commands", this::openLonde);
