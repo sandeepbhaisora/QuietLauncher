@@ -10,6 +10,7 @@
     <application android:label="Quiet" android:icon="@drawable/icon_quiet"
         android:allowBackup="false" android:supportsRtl="true"
         android:theme="@style/AppTheme">
+        <activity android:name=".TrainingActivity" android:exported="false"/>
         <activity android:name=".MainActivity" android:exported="true"
             android:launchMode="singleTask" android:stateNotNeeded="true"
             android:windowSoftInputMode="adjustResize">

@@ -514,6 +514,8 @@ public final class MainActivity extends Activity {
         r.setOnLongClickListener(v -> { appOptions(a); return true; });
     }
 
+    private void openTraining() { startSafe(new Intent(this, TrainingActivity.class)); }
+
     private void renderRoot() {
         add(main, text("Your day,\nin one place.", 34, ink, true), 18);
         add(main, text("Tools that help you finish, not scroll.", 14, muted, false), 7);
@@ -524,6 +526,12 @@ public final class MainActivity extends Activity {
         add(calendar, text(new SimpleDateFormat("EEEE · d", Locale.getDefault()).format(now.getTime()), 29, ink, true), 7);
         add(calendar, text("Tap to open your calendar", 12, muted, false), 7);
         calendar.setOnClickListener(v -> openCalendar()); add(main, calendar, 9);
+
+        section(main, "QUIET TRAINING", "OPEN  ↗", this::openTraining);
+        LinearLayout training = card();
+        add(training, text("Train with intention.", 21, ink, true), 0);
+        add(training, text("Smart workout plans · set logging · progress · offline", 12, muted, false), 7);
+        training.setOnClickListener(v -> openTraining()); add(main, training, 9);
 
         section(main, "TIME & ATTENTION", "USAGE  ↗", () -> show("usage"));
         LinearLayout focus = card();
