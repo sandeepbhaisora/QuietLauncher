@@ -583,6 +583,18 @@ public final class MainActivity extends Activity {
             .show();
     }
 
+    private void checkChatGptAuthInBrowser() {
+        try {
+            Intent check = new Intent(Intent.ACTION_VIEW,
+                Uri.parse("https://auth.openai.com/.well-known/openid-configuration"));
+            check.addCategory(Intent.CATEGORY_BROWSABLE);
+            startActivity(check);
+        } catch (Exception ex) {
+            Toast.makeText(this, "No browser could open the authentication test.",
+                Toast.LENGTH_LONG).show();
+        }
+    }
+
     private void beginChatGptSignIn() {
         Toast.makeText(this, "Opening ChatGPT sign-in...", Toast.LENGTH_SHORT).show();
         ChatGptAuth.signIn(this, background, handler, (ok, message) -> {
@@ -600,21 +612,21 @@ public final class MainActivity extends Activity {
         boolean permitted = connected && ChatGptAuth.canUsePlan(this);
         AlertDialog.Builder dialog = new AlertDialog.Builder(this);
         if (connected) {
-            dialog.setTitle("ChatGPT connected")
+            dialog.setTitle("ChatGPT connection")
                 .setMessage(ChatGptAuth.account(this) + "\n\n" +
-                    (permitted ? "AI planning permission: granted." :
-                    "Signed in, but AI planning permission isn't available for this connection."))
+                    (permitted ? "Sign-in and AI planning permission are saved." :
+                    "Signed in, but AI planning permission has not been granted."))
                 .setPositiveButton(permitted ? "Done" : "Review permissions",
                     (d, w) -> { if (!permitted) beginChatGptSignIn(); })
                 .setNeutralButton("Disconnect", (d, w) -> {
-                    ChatGptAuth.disconnect(this);
-                    render();
+                    ChatGptAuth.disconnect(this); render();
                 })
                 .setNegativeButton("Cancel", null);
         } else {
             dialog.setTitle("Connect ChatGPT")
-                .setMessage("Sign in through OpenAI in your browser. Quiet never sees your password. Connecting is optional.")
-                .setPositiveButton("Sign in", (d, w) -> beginChatGptSignIn())
+                .setMessage("Your browser sign-in is only complete after Quiet securely receives a token. If it fails to connect, test the authentication host in your browser.")
+                .setPositiveButton("Sign in", (d,w) -> beginChatGptSignIn())
+                .setNeutralButton("Check in browser", (d,w) -> checkChatGptAuthInBrowser())
                 .setNegativeButton("Not now", null);
         }
         dialog.show();
