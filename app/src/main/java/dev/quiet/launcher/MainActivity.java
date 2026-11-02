@@ -223,7 +223,10 @@ public final class MainActivity extends Activity {
 
     private GradientDrawable shape(int color, int radius, int stroke) {
         GradientDrawable d = new GradientDrawable();
-        d.setColor(color); d.setCornerRadius(dp(radius));
+        // Quiet's visual language is intentionally architectural: 4dp maximum,
+        // never pill-shaped or oversized rounded corners.
+        d.setColor(color);
+        d.setCornerRadius(dp(Math.min(radius, 4)));
         if (stroke != 0) d.setStroke(dp(1), stroke);
         return d;
     }

@@ -142,7 +142,8 @@ public final class TrainingActivity extends Activity {
     private GradientDrawable shape(int color, int radius) {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(color);
-        drawable.setCornerRadius(dp(radius));
+        // Match the boxy 4dp launcher corners across all training cards.
+        drawable.setCornerRadius(dp(Math.min(radius, 4)));
         return drawable;
     }
     private LinearLayout col() { LinearLayout v = new LinearLayout(this); v.setOrientation(1); return v; }
