@@ -666,6 +666,19 @@ public final class MainActivity extends Activity {
             Toast.makeText(this,"Enter a command up to 220 characters",Toast.LENGTH_LONG).show();
             return;
         }
+        // Calendar questions need actual calendar data, not a model-generated action.
+        if (query.toLowerCase(Locale.ROOT).matches(".*\\b(meetings?|appointments?|calendar|schedule)\\b.*")
+                && query.toLowerCase(Locale.ROOT).matches(".*\\b(what|when|do i|have|show|today|tomorrow)\\b.*")) {
+            new AlertDialog.Builder(this).setTitle("Your meetings")
+                .setMessage("ChatGPT account sign-in doesn't grant access to your Google Calendar. Open your calendar to see real meetings.")
+                .setPositiveButton("Open calendar", (d,w) -> {
+                    Intent open = new Intent(Intent.ACTION_MAIN);
+                    open.addCategory(Intent.CATEGORY_APP_CALENDAR);
+                    startSafe(open);
+                })
+                .setNegativeButton("Cancel", null).show();
+            return;
+        }
         if (!ChatGptAuth.canUsePlan(this)) {
             if (ChatGptAuth.isConnected(this)) {
                 new AlertDialog.Builder(this).setTitle("ChatGPT connected")
@@ -698,8 +711,9 @@ public final class MainActivity extends Activity {
                         handler.post(()-> {
                             if(isDestroyed()||isFinishing())return;
                             new AlertDialog.Builder(this).setTitle("ChatGPT request failed")
-                                .setMessage("No actions were run. Your account may not have access to "+
-                                    "this model or usage may be exhausted. Try a local command.")
+                                .setMessage("No actions were run. " + e.getClass().getSimpleName()
+                                    + ": " + (e.getMessage() == null ? "Unknown failure" : e.getMessage())
+                                    + "\\n\\nDon't paste access tokens or sensitive request data.")
                                 .setPositiveButton("OK",null).show();
                         });
                     }
