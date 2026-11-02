@@ -82,6 +82,7 @@ final class ChatGptAuth {
 
     static void signIn(Activity activity, ExecutorService executor, Handler ui, Callback callback) {
         executor.execute(() -> {
+            String stage = "Prepare sign-in";
             try (ServerSocket listener = new ServerSocket(
                     0, 1, InetAddress.getByName("127.0.0.1"))) {
                 listener.setSoTimeout(180000);
@@ -121,6 +122,7 @@ final class ChatGptAuth {
                         url.append("&login_hint=").append(enc(old.optString("email")));
                 }
 
+                stage = "Browser authorization";
                 ui.post(() -> {
                     try {
                         Intent browser = new Intent(Intent.ACTION_VIEW, Uri.parse(url.toString()));
@@ -131,7 +133,9 @@ final class ChatGptAuth {
                         callback.finished(false, "No browser available for ChatGPT sign-in.");
                     }
                 });
+                stage = "Waiting for browser callback";
                 Map<String,String> parameters = waitForCallback(listener);
+                stage = "Validate browser callback";
                 if (!state.equals(parameters.get("state")))
                     throw new SecurityException("Sign-in state did not match");
                 if (parameters.containsKey("error"))
@@ -149,11 +153,13 @@ final class ChatGptAuth {
                         throw new IllegalStateException("Could not save ChatGPT registration");
                 } else if (callbackClient != null && !callbackClient.equals(issued))
                     throw new SecurityException("OAuth client ID changed");
+                stage = "Exchange authorization code";
                 JSONObject tokens = formPost(activity, TOKEN_URL,
                     "grant_type", "authorization_code",
                     "client_id", issued, "code", code,
                     "code_verifier", verifier, "redirect_uri", redirect,
                     "resource", RESOURCE);
+                stage = "Verify ID token and signing keys";
                 String idToken = tokens.getString("id_token");
                 JSONObject identity = validateIdToken(activity, idToken, issued, nonce);
                 if (old != null && !old.optString("subject").equals(identity.getString("sub")))
@@ -169,14 +175,21 @@ final class ChatGptAuth {
                 session.put("scope", granted);
                 session.put("expires_at", System.currentTimeMillis()
                     + tokens.optLong("expires_in", 3600) * 1000L);
+                stage = "Save encrypted session";
                 saveSession(activity, session);
-                prefs.edit().remove("pending_client_id").apply();
+                prefs.edit().remove("pending_client_id").remove("last_oauth_failure").apply();
                 boolean usage = hasScope(granted, "chatgpt.tokens.use.direct");
                 finish(ui, callback, true, usage
                     ? "ChatGPT connected. Model usage is authorized."
                     : "ChatGPT signed in, but AI usage permission was not granted.");
             } catch (Exception ex) {
-                finish(ui, callback, false, "Sign-in failed: " + friendlyError(ex));
+                // Only a non-sensitive stage and exception type. Never record
+                // authorization code, tokens, account identity, or URLs with secrets.
+                String problem = stage + ": " + ex.getClass().getSimpleName();
+                activity.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+                    .edit().putString("last_oauth_failure", problem).apply();
+                finish(ui, callback, false,
+                    "Sign-in failed during " + stage + ". " + friendlyError(ex));
             }
         });
     }
@@ -450,7 +463,38 @@ final class ChatGptAuth {
                         .append("FAILED (").append(e.getClass().getSimpleName()).append(")\n");
             } finally { if (conn != null) conn.disconnect(); }
         }
-        report.append("\nTests use HTTPS certificate verification. No account tokens are sent.");
+        // Probe the *same method and endpoint* used for code exchange, without
+        // any real authorization code, client ID, or user token. Any HTTP response
+        // means TCP, TLS and DNS worked; 4xx rejection is expected.
+        for (int i = 0; i < (network == null ? 1 : 2); i++) {
+            HttpURLConnection conn = null;
+            try {
+                conn = connection(context, TOKEN_URL, i == 1);
+                conn.setInstanceFollowRedirects(false);
+                conn.setConnectTimeout(5500);
+                conn.setReadTimeout(5500);
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                try (OutputStream out = conn.getOutputStream()) {
+                    out.write("grant_type=quiet_connectivity_probe".getBytes(StandardCharsets.US_ASCII));
+                }
+                int status = conn.getResponseCode();
+                report.append(i == 0 ? "Token POST (app): " : "Token POST (network): ")
+                    .append("HTTP ").append(status)
+                    .append(status >= 400 && status < 500 ? " (expected rejection)" : "")
+                    .append("\n");
+            } catch (Exception e) {
+                report.append(i == 0 ? "Token POST (app): " : "Token POST (network): ")
+                    .append("FAILED (").append(e.getClass().getSimpleName())
+                    .append(")\n");
+            } finally { if (conn != null) conn.disconnect(); }
+        }
+        String failed = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .getString("last_oauth_failure", "");
+        report.append("\nLast sign-in failure: ")
+            .append(failed.isEmpty() ? "None recorded" : failed);
+        report.append("\nNo real authorization codes, account tokens or passwords were sent in this diagnostic.");
         return report.toString();
     }
 
@@ -505,9 +549,9 @@ final class ChatGptAuth {
     private static String friendlyError(Exception e) {
         for (Throwable cause = e; cause != null; cause = cause.getCause()) {
             if (cause instanceof java.net.UnknownHostException)
-                return "DNS lookup failed for auth.openai.com. Browser approval may have succeeded, "
-                    + "but Quiet could not exchange the code. Try mobile data instead of Wi-Fi, "
-                    + "or check VPN/Private DNS settings. Use Check in Browser to test.";
+                return "An individual HTTPS request failed DNS resolution. The previous "
+                    + "diagnostic confirms networking can work; the sign-in stage now identifies "
+                    + "which request failed. Open Diagnose network and copy the new report.";
             if (cause instanceof java.net.SocketTimeoutException)
                 return "Network or browser callback timed out. Check your connection and try again.";
             if (cause instanceof java.net.ConnectException)
