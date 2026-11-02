@@ -387,7 +387,7 @@ public final class TrainingActivity extends Activity {
                     int n = countSets(updated, exercise.name);
                     counter.setText(n + " of 3 sets logged");
                     completed.setText(updated.length() + " sets logged");
-                    if (n >= 3) { log.setText("THREE SETS LOGGED"); log.setEnabled(false); log.setAlpha(.6f); }
+                    if (n >= 3) render();
                     prefs.edit().putLong("rest_until", System.currentTimeMillis() + restSeconds() * 1000L).apply();
                 } catch (Exception ignored) { }
             });
