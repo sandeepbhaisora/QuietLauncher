@@ -63,12 +63,18 @@ final class ChatGptAuth {
     // The browser can finish its loopback callback while Quiet is backgrounded.
     // Samsung/Android may defer the app's network work until it is foregrounded.
     private static volatile CountDownLatch waitForAppForeground;
+    private static volatile boolean launcherForeground;
 
     private ChatGptAuth() {}
 
     static void onLauncherResumed() {
+        launcherForeground = true;
         CountDownLatch pending = waitForAppForeground;
         if (pending != null) pending.countDown();
+    }
+
+    static void onLauncherPaused() {
+        launcherForeground = false;
     }
 
     static boolean isConnected(Context context) {
@@ -171,6 +177,8 @@ final class ChatGptAuth {
                 CountDownLatch foreground = new CountDownLatch(1);
                 waitForAppForeground = foreground;
                 try {
+                    // Handle return-to-Quiet racing the loopback callback read.
+                    if (launcherForeground) foreground.countDown();
                     ui.post(() -> {
                         if (activity.hasWindowFocus()) foreground.countDown();
                     });

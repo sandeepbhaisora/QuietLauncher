@@ -182,6 +182,11 @@ public final class MainActivity extends Activity {
         else if ("home".equals(page)) render();
     }
 
+    @Override protected void onPause() {
+        ChatGptAuth.onLauncherPaused();
+        super.onPause();
+    }
+
     // Intentionally no activity-wide gesture interception in v0.2:
     // normal tapping, lists and scrolling should take precedence.
     private void navigateRelative(int delta) {
