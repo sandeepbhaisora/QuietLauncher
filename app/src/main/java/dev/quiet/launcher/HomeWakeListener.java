@@ -29,9 +29,10 @@ final class HomeWakeListener {
         void onUnavailable(String why);
     }
 
+    // Only a completed, explicit wake phrase can arm command listening.
+    // Avoid permissive aliases such as "hello London" that caused false wakes.
     private static final Pattern WAKE = Pattern.compile(
-        "^(?:hey|hi|hello|okay|ok|हेलो|हे|ए)\\s+" +
-        "(?:londe|lond[eay]?|london|launde|launda|lande|londay|लोंडे|लौंडे|लंडे|लॉन्डे|लोंडा)" +
+        "^(?:hey\\s+londe|हे\\s+लोंडे|हे\\s+लौंडे)" +
         "(?=$|[\\s,.;:!?])", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final long COMMAND_WINDOW_MS = 20000L;
     private final Activity activity;
