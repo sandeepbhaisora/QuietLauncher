@@ -166,7 +166,6 @@ public final class LondeActivity extends Activity {
         answerScroll.setBackground(panel(surface, 5));
         answerScroll.setMinimumHeight(dp(73));
         answerScroll.setVerticalScrollBarEnabled(false);
-        answerScroll.setMaxScrollAmount(dp(180));
         // Avoid growing into a second full-screen chat window.
         answerScroll.getLayoutParams().height = dp(170);
 
