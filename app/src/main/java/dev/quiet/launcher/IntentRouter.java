@@ -62,7 +62,7 @@ final class IntentRouter {
         final String error;
         final String original;
 
-        private Plan(String original, List<Step> steps, String error) {
+        Plan(String original, List<Step> steps, String error) {
             this.original = original;
             this.steps = Collections.unmodifiableList(new ArrayList<>(steps));
             this.error = error;
