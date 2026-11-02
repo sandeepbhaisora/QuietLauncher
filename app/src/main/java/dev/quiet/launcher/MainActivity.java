@@ -595,6 +595,27 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void diagnoseChatGptConnection() {
+        new AlertDialog.Builder(this).setTitle("Checking Quiet's network")
+            .setMessage("Testing DNS and HTTPS inside the launcher, without sending credentials.")
+            .setPositiveButton("OK",null).show();
+        background.execute(() -> {
+            String report = ChatGptAuth.diagnose(this);
+            handler.post(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                new AlertDialog.Builder(this).setTitle("Quiet connection diagnostics")
+                    .setMessage(report)
+                    .setPositiveButton("OK",null)
+                    .setNeutralButton("Copy", (d,w) -> {
+                        android.content.ClipboardManager clipboard =
+                            (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                        if (clipboard != null) clipboard.setPrimaryClip(
+                            android.content.ClipData.newPlainText("Quiet network report", report));
+                    }).show();
+            });
+        });
+    }
+
     private void beginChatGptSignIn() {
         Toast.makeText(this, "Opening ChatGPT sign-in...", Toast.LENGTH_SHORT).show();
         ChatGptAuth.signIn(this, background, handler, (ok, message) -> {
@@ -626,7 +647,7 @@ public final class MainActivity extends Activity {
             dialog.setTitle("Connect ChatGPT")
                 .setMessage("Your browser sign-in is only complete after Quiet securely receives a token. If it fails to connect, test the authentication host in your browser.")
                 .setPositiveButton("Sign in", (d,w) -> beginChatGptSignIn())
-                .setNeutralButton("Check in browser", (d,w) -> checkChatGptAuthInBrowser())
+                .setNeutralButton("Diagnose network", (d,w) -> diagnoseChatGptConnection())
                 .setNegativeButton("Not now", null);
         }
         dialog.show();
