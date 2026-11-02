@@ -374,7 +374,7 @@ public final class MainActivity extends Activity {
     private void render() {
         if (prefs == null) return;
         setPalette(); focusLive = null; clockLive = null;
-        shell = column(); shell.setBackgroundColor(bg);
+        shell = column(); shell.setBackgroundColor("home".equals(page) ? c("#041322") : bg);
         shell.setPadding(dp(18), dp(7), dp(18), dp(6));
         // Android 15+ draws behind system bars by default. Respect both insets.
         shell.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -404,7 +404,7 @@ public final class MainActivity extends Activity {
             next.setContentDescription("Next screen");
             top.addView(next);
         }
-        shell.addView(top);
+        if (!"home".equals(page)) shell.addView(top);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(false); scroll.setVerticalScrollBarEnabled(false);
         main = column(); main.setPadding(dp(1), 0, dp(1), dp(14));
@@ -421,7 +421,7 @@ public final class MainActivity extends Activity {
             case "widgets": renderWidgets(); break;
             default: renderSettings(); break;
         }
-        shell.addView(bottomNav());
+        if (!"home".equals(page)) shell.addView(bottomNav());
         // Build the whole screen detached, then attach once per navigation.
         setContentView(shell);
     }
@@ -459,181 +459,152 @@ public final class MainActivity extends Activity {
      * Intent-first UI with context grounded in on-device state. This is a local
      * command router and a visual assistant, NOT a running LLM or voice service.
      */
-    private void renderAiHome() {
-        Calendar now = Calendar.getInstance();
-        int hour = now.get(Calendar.HOUR_OF_DAY);
-        String greeting = hour < 12 ? "Good morning." : (hour < 17 ? "Good afternoon." : "Good evening.");
-        String date = new SimpleDateFormat("EEE, d MMM", Locale.getDefault()).format(now.getTime());
-        LinearLayout meta = row();
-        meta.addView(label(date.toUpperCase(Locale.ROOT)), new LinearLayout.LayoutParams(0, -2, 1));
-        clockLive = text(new SimpleDateFormat("HH:mm", Locale.getDefault()).format(now.getTime()),
-                15, muted, true);
-        meta.addView(clockLive);
-        add(main, meta, 13);
+    private String aiScene = "hub";
+    private static final int AI_CYAN = 0xff6aeafa;
+    private static final int AI_WHITE = 0xffe3faff;
+    private static final int AI_DIM = 0xff82abb9;
 
-        LinearLayout hero = card();
-        hero.setPadding(dp(14), dp(18), dp(14), dp(18));
-        hero.setBackground(shape(c("#081C2A"), 18, c("#167B95")));
-        LinearLayout heroRow = row();
-        LinearLayout copy = column();
-        add(copy, label("QUIET  /  INTENT HOME"), 0);
-        add(copy, text(greeting, 25, ink, true), 11);
-        add(copy, text(focusActive() ? "One task at a time." : "What matters next?",
-                17, ink, false), 7);
-        add(copy, text("A calmer way to use your phone.", 12, muted, false), 7);
-        heroRow.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
-        QuietFace face = new QuietFace();
-        face.setContentDescription("Londe AI face, voice-activated when enabled");
-        assistantFace=face;
-        face.setOnClickListener(v->new AlertDialog.Builder(this)
-            .setTitle("Londe voice wake")
-            .setMessage("Say Hey Londe while Quiet Home is visible. Enable voice wake in Settings. Always-on screen-off activation is not supported.")
-            .setPositiveButton("Settings",(d,w)->show("settings"))
-            .setNegativeButton("Close",null).show());
-        heroRow.addView(face, new LinearLayout.LayoutParams(dp(92), dp(108)));
-        hero.addView(heroRow);
-        add(main, hero, 7);
-        AiHudView hud = new AiHudView(this);
-        hud.setContentDescription("Animated Quiet OS AI core. Open assistant");
-        hud.setOnClickListener(v -> openLonde());
-        LinearLayout hudCard = card();
-        hudCard.setBackground(shape(c("#061722"), 18, c("#14738C")));
-        TextView hudLabel = text("QUIET OS  //  AI CORE", 12, c("#5BDFF5"), true);
-        hudLabel.setLetterSpacing(.17f);
-        add(hudCard, hudLabel, 0);
-        hudCard.addView(hud, new LinearLayout.LayoutParams(-1, dp(230)));
-        add(hudCard, text("OFFLINE HOTWORD ENGINE · NOT YET INSTALLED", 11,
-                c("#7EAEBB"), false), 0);
-        add(hudCard, pill("OPEN LONDE CONSOLE  ↗", this::openLonde), 12);
-        add(main, hudCard, 10);
-        LinearLayout aiPanel=card();
-        londeStatus=text(wakeState,12,accent,true);
-        add(aiPanel,londeStatus,6);
-        londeReply=text(recentReply,15,ink,false);
-        add(aiPanel,londeReply,9);
-        londeHeard=text(wakeLastHeard,11,muted,false);
-        add(aiPanel,londeHeard,7);
-        TextView inputHint=pill("ASK LONDE HERE  ↗",()->{
+    private TextView aiText(String label, int size, int color, boolean bold, boolean center) {
+        TextView t=text(label,size,color,bold);
+        if(center)t.setGravity(Gravity.CENTER);
+        return t;
+    }
+    private TextView aiButton(String label,Runnable action) {
+        TextView b=aiText(label,13,AI_WHITE,true,true);
+        b.setPadding(dp(12),dp(13),dp(12),dp(13));
+        b.setBackground(shape(c("#102C41"),4,c("#277B9D")));
+        b.setOnClickListener(v->action.run());
+        return b;
+    }
+    private void aiScene(String scene){aiScene=scene;render();}
+    private void aiSceneListen() {
+        aiScene="listening";
+        render();
+        // User action only; this is NOT continuous wake-word recognition.
+        startVoiceInput();
+    }
+    private void renderAiHome() {
+        main.setPadding(dp(5),dp(2),dp(5),dp(24));
+        main.setBackgroundColor(c("#041322"));
+        if("standby".equals(aiScene)){
+            TextView clock=aiText(new SimpleDateFormat("HH:mm",Locale.getDefault())
+                    .format(new Date()),58,AI_WHITE,false,true);
+            clockLive=clock;
+            add(main,clock,20);
+            add(main,aiText(new SimpleDateFormat("EEE, MMM d",Locale.getDefault())
+                    .format(new Date()),15,AI_DIM,false,true),2);
+            AiSceneView art=new AiSceneView(this,AiSceneView.Scene.STANDBY);
+            main.addView(art,new LinearLayout.LayoutParams(-1,dp(360)));
+            add(main,aiText("Waiting for you…",19,AI_WHITE,true,true),12);
+            add(main,aiText("Tap the core to open Londe",12,AI_DIM,false,true),4);
+            art.setOnClickListener(v->aiScene("hub"));
+            add(main,aiButton("OPEN AI HOME  ↗",()->aiScene("hub")),24);
+            add(main,aiButton("APPS   ▦",()->show("apps")),9);
+            return;
+        }
+        if("listening".equals(aiScene)){
+            add(main,aiText("VOICE INPUT  /  ACTIVATED BY TAP",11,AI_CYAN,true,true),16);
+            AiSceneView art=new AiSceneView(this,AiSceneView.Scene.LISTENING);
+            main.addView(art,new LinearLayout.LayoutParams(-1,dp(425)));
+            add(main,aiText("Listening…",29,AI_WHITE,true,true),6);
+            add(main,aiText("Speak into your microphone.",14,AI_DIM,false,true),12);
+            add(main,aiText("Android speech recognition may use a network service.",11,AI_DIM,false,true),14);
+            add(main,aiButton("CANCEL / HOME",()->aiScene("hub")),30);
+            return;
+        }
+        if("response".equals(aiScene)){
+            add(main,aiText("LONDE  /  RESPONSE",13,AI_CYAN,true,true),16);
+            AiSceneView art=new AiSceneView(this,AiSceneView.Scene.RESPONSE);
+            main.addView(art,new LinearLayout.LayoutParams(-1,dp(265)));
+            LinearLayout panel=column();
+            panel.setPadding(dp(16),dp(18),dp(16),dp(18));
+            panel.setBackground(shape(c("#0C3044"),4,c("#1D9AB7")));
+            add(panel,aiText("✦  LONDE",14,AI_CYAN,true,false),0);
+            londeStatus=aiText(wakeState,11,AI_DIM,true,false);
+            add(panel,londeStatus,9);
+            londeReply=aiText(recentReply,16,AI_WHITE,false,false);
+            add(panel,londeReply,13);
+            add(main,panel,12);
+            add(main,aiButton("ASK SOMETHING ELSE",this::aiSceneListen),16);
+            add(main,aiButton("BACK TO HOME",()->aiScene("hub")),8);
+            return;
+        }
+        LinearLayout header=row();
+        TextView logo=aiText("QUIET OS",17,AI_WHITE,true,false);
+        header.addView(logo,new LinearLayout.LayoutParams(0,dp(38),1));
+        header.addView(aiButton("◉  STANDBY",()->aiScene("standby")));
+        add(main,header,9);
+
+        LinearLayout identity=row();
+        AiSceneView avatar=new AiSceneView(this,AiSceneView.Scene.HUB);
+        identity.addView(avatar,new LinearLayout.LayoutParams(dp(86),dp(90)));
+        LinearLayout intro=column();
+        add(intro,aiText("Londe",25,AI_WHITE,true,false),5);
+        add(intro,aiText("Your AI companion",12,AI_DIM,false,false),5);
+        identity.addView(intro,new LinearLayout.LayoutParams(0,-2,1));
+        TextView settings=aiButton("⚙",()->show("settings"));
+        identity.addView(settings);
+        add(main,identity,14);
+        add(main,aiText("GOOD TO SEE YOU.",12,AI_CYAN,true,true),14);
+        add(main,aiText("Ready when you are.",19,AI_WHITE,false,true),8);
+
+        AiSceneView globe=new AiSceneView(this,AiSceneView.Scene.HUB);
+        globe.setOnClickListener(v->openLonde());
+        globe.setContentDescription("Animated Londe holographic AI core");
+        main.addView(globe,new LinearLayout.LayoutParams(-1,dp(205)));
+
+        LinearLayout actions=row();
+        String[] names={"TRAINING","FOCUS","USAGE","ASSISTANT"};
+        Runnable[] handlers={this::openTraining,this::focusDialog,()->show("usage"),this::openLonde};
+        for(int i=0;i<4;i++){
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(55),1);
+            if(i!=0)lp.leftMargin=dp(6);
+            actions.addView(aiButton(names[i],handlers[i]),lp);
+        }
+        add(main,actions,14);
+        add(main,aiButton("⌨  TYPE OR ASK LONDE",()->{
             EditText question=new EditText(this);
             question.setSingleLine(false);
-            question.setHint("Ask a question or say a command");
-            new AlertDialog.Builder(this).setTitle("Londe on Home")
+            question.setHint("Ask a question or request an action");
+            new AlertDialog.Builder(this).setTitle("Ask Londe")
                 .setView(question).setNegativeButton("Cancel",null)
-                .setPositiveButton("Ask",(d,w)->homeAsk(question.getText().toString()))
-                .show();
-        });
-        add(aiPanel,inputHint,5);
-        add(main,aiPanel,13);
+                .setPositiveButton("Send",(d,w)->{
+                    aiScene="response";
+                    render();
+                    homeAsk(question.getText().toString());
+                }).show();
+        }),10);
 
-        // Keep the primary input obvious, functional, and independently scrollable.
-        LinearLayout commandCard = card();
-        add(commandCard, label("TELL QUIET WHAT TO DO"), 0);
-        EditText command = new EditText(this);
-        command.setSingleLine(true);
-        command.setTextSize(15);
-        command.setTextColor(ink);
-        command.setHintTextColor(muted);
-        command.setHint("Focus for 25 min, train, open Maps…");
-        command.setImeOptions(EditorInfo.IME_ACTION_GO);
-        command.setPadding(dp(12), dp(13), dp(12), dp(13));
-        command.setBackground(shape(surface2, 4, line));
-        add(commandCard, command, 11);
-        Runnable execute = () -> runSmartCommand(command.getText().toString());
-        command.setOnEditorActionListener((v, action, event) -> {
-            if (action == EditorInfo.IME_ACTION_GO) { execute.run(); return true; }
-            return false;
-        });
-        LinearLayout commandButtons = row();
-        TextView run = pill("PREVIEW / RUN  →", execute);
-        commandButtons.addView(run, new LinearLayout.LayoutParams(0, dp(49), 1));
-        TextView speak = pill("🎙  SPEAK", this::startVoiceInput);
-        LinearLayout.LayoutParams micParams = new LinearLayout.LayoutParams(-2, dp(49));
-        micParams.leftMargin = dp(8);
-        commandButtons.addView(speak, micParams);
-        run.setContentDescription("Run local command");
-        add(commandCard, commandButtons, 11);
-        TextView askAi = pill("ASK AI  ✧  OPTIONAL", () -> requestAiPlan(command.getText().toString()));
-        add(commandCard, askAi, 9);
-        TextView chat = pill("USE CHATGPT ACCOUNT  ✦",
-                () -> requestChatGptPlan(command.getText().toString()));
-        add(commandCard, chat, 9);
-        add(commandCard, pill("◉  TALK TO LONDE", this::openLonde), 9);
-        add(main, commandCard, 13);
-        add(main, text("Local action router. Tap Speak for Android's speech service (it may use the network). No always-on listening.",
-                11, muted, false), 8);
+        LinearLayout today=column();
+        today.setPadding(dp(15),dp(14),dp(15),dp(15));
+        today.setBackground(shape(c("#092538"),4,c("#1C6A83")));
+        add(today,aiText("TODAY AT A GLANCE",13,AI_WHITE,true,false),0);
+        add(today,aiText("Workout  ·  "+(activeTrainingSets()>0
+                ? activeTrainingSets()+" active sets" : "Ready to train"),13,AI_DIM,false,false),13);
+        add(today,aiText("Focus  ·  "+(focusActive()?remainingFocus():"Not started"),
+                13,AI_DIM,false,false),8);
+        londeStatus=aiText(wakeState,12,AI_CYAN,true,false);
+        add(today,londeStatus,12);
+        londeReply=aiText(recentReply,13,AI_WHITE,false,false);
+        londeReply.setMaxLines(3);
+        add(today,londeReply,7);
+        londeHeard=aiText(wakeLastHeard,11,AI_DIM,false,false);
+        add(today,londeHeard,5);
+        add(main,today,15);
 
-        section(main, "SUGGESTED FOR YOU", "VIEW ALL  ↗", () -> show("root"));
-        boolean hasDraft = !getSharedPreferences("quiet_workspace_v1", MODE_PRIVATE)
-                .getString("saved_text", "").trim().isEmpty();
-        boolean hasWorkout = recentWorkoutTime() > 0;
-        int activeSets = activeTrainingSets();
-        if (focusActive()) {
-            add(main, smartTile("CONTINUE FOCUS", "Your session is still running",
-                    "◉", this::focusDialog), 10);
-        } else if (activeSets > 0) {
-            add(main, smartTile("FINISH YOUR WORKOUT", activeSets + " set(s) waiting to be saved",
-                    "↗", this::openTraining), 10);
-        } else if (hasDraft) {
-            add(main, smartTile("RESUME WORKSPACE", "Continue your locally saved draft",
-                    "↗", this::openWorkspace), 10);
-        } else {
-            add(main, smartTile(hour >= 17 ? "TRAIN FOR 30 MIN" : "START A FOCUS SESSION",
-                    hour >= 17 ? "A balanced session for today" : "Create time for one important task",
-                    "↗", hour >= 17 ? () -> startTraining(30) : this::focusDialog), 10);
+        LinearLayout dock=row();
+        String[] labels={"PHONE","APPS","SPEAK","WORK","SETTINGS"};
+        Runnable[] nav={()->show("apps"),()->show("apps"),this::aiSceneListen,
+                this::openWorkspace,()->show("settings")};
+        for(int i=0;i<nav.length;i++){
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(55),1);
+            if(i!=0)lp.leftMargin=dp(5);
+            dock.addView(aiButton(labels[i],nav[i]),lp);
         }
-
-        LinearLayout topActions = row();
-        topActions.addView(actionTile("TRAIN", "Workout plan",
-                "▤", () -> openTraining()), new LinearLayout.LayoutParams(0, dp(104), 1));
-        spaceHorizontal(topActions, 9);
-        topActions.addView(actionTile("WORKSPACE", hasDraft ? "Resume draft" : "Read or write",
-                "▧", this::openWorkspace), new LinearLayout.LayoutParams(0, dp(104), 1));
-        add(main, topActions, 9);
-        LinearLayout secondActions = row();
-        secondActions.addView(actionTile("FOCUS", focusActive() ? "In progress" : "Protect your time",
-                "◎", this::focusDialog), new LinearLayout.LayoutParams(0, dp(104), 1));
-        spaceHorizontal(secondActions, 9);
-        secondActions.addView(actionTile("APPS", "Everything installed",
-                "▦", () -> show("apps")), new LinearLayout.LayoutParams(0, dp(104), 1));
-        add(main, secondActions, 9);
-
-        section(main, "YOUR CURRENT CONTEXT", null, null);
-        LinearLayout context = card();
-        if (focusActive()) {
-            focusLive = text(remainingFocus(), 28, ink, true);
-            add(context, label("FOCUS SESSION  ·  REMAINING"), 0);
-            add(context, focusLive, 6);
-            add(context, text("Tap to adjust or stop", 12, muted, false), 4);
-            context.setOnClickListener(v -> focusDialog());
-        } else if (activeSets > 0) {
-            add(context, text(activeSets + " workout sets logged", 19, ink, true), 0);
-            add(context, text("Your unfinished training session is saved on this phone.",
-                    12, muted, false), 6);
-            context.setOnClickListener(v -> openTraining());
-        } else {
-            add(context, text("A clean slate.", 19, ink, true), 0);
-            add(context, text(hasWorkout ? "Your workouts are saved in Quiet Training." :
-                    "Start a focus session or choose a useful action above.", 12, muted, false), 7);
-        }
-        add(main, context, 9);
-
-        section(main, "QUICK ACCESS", "CLASSIC VIEW  ↗", () -> show("classic"));
-        List<App> fav = favorites();
-        if (!fav.isEmpty()) {
-            LinearLayout quick = row();
-            for (int i = 0; i < Math.min(3, fav.size()); i++) {
-                App a = fav.get(i);
-                TextView shortcut = pill(a.name, () -> open(a));
-                shortcut.setSingleLine(true);
-                shortcut.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(48), 1);
-                if (i > 0) lp.leftMargin = dp(7);
-                quick.addView(shortcut, lp);
-            }
-            add(main, quick, 9);
-        }
-        add(main, pill("OPEN CLASSIC HOME  ↗", () -> show("classic")), 13);
-        space(main, 24);
+        add(main,dock,14);
+        add(main,aiText("Hands-free Hey Londe is not enabled yet. Tap SPEAK.",
+                11,AI_DIM,false,true),10);
+        add(main,aiButton("CLASSIC HOME",()->show("classic")),11);
     }
 
     private LinearLayout smartTile(String title, String detail, String icon, Runnable action) {
@@ -947,6 +918,7 @@ public final class MainActivity extends Activity {
                     recentReply="You: "+q+"\\n\\nLonde: "+result.text;
                     if(londeReply!=null)londeReply.setText(recentReply);
                     wakeStatus("LONDE REPLIED");
+                    if ("response".equals(aiScene) && "home".equals(page)) render();
                     if(voiceReady && londeSpeech!=null){
                         londeSpeaking=true;
                         int started=londeSpeech.speak(
@@ -2095,11 +2067,22 @@ public final class MainActivity extends Activity {
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request == REQUEST_VOICE_COMMAND) {
+            if ("listening".equals(aiScene) && result != RESULT_OK) {
+                aiScene("hub");
+                return;
+            }
             if (result == RESULT_OK && data != null) {
                 ArrayList<String> matches = data.getStringArrayListExtra(
                         RecognizerIntent.EXTRA_RESULTS);
                 if (matches != null && !matches.isEmpty()) {
                     String recognized = matches.get(0);
+                    if ("listening".equals(aiScene)) {
+                        aiScene = "response";
+                        recentReply = "You: " + recognized + "\\n\\nReview your command before execution.";
+                        render();
+                        homeAsk(recognized);
+                        return;
+                    }
                     new AlertDialog.Builder(this).setTitle("You said")
                             .setMessage(recognized)
                             .setNegativeButton("Cancel", null)
