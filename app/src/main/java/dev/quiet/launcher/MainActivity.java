@@ -562,6 +562,18 @@ public final class MainActivity extends Activity {
             actions.addView(aiButton(names[i],handlers[i]),lp);
         }
         add(main,actions,14);
+        add(main,aiButton("⌨  TYPE OR ASK LONDE",()->{
+            EditText question=new EditText(this);
+            question.setSingleLine(false);
+            question.setHint("Ask a question or request an action");
+            new AlertDialog.Builder(this).setTitle("Ask Londe")
+                .setView(question).setNegativeButton("Cancel",null)
+                .setPositiveButton("Send",(d,w)->{
+                    aiScene="response";
+                    render();
+                    homeAsk(question.getText().toString());
+                }).show();
+        }),10);
 
         LinearLayout today=column();
         today.setPadding(dp(15),dp(14),dp(15),dp(15));
