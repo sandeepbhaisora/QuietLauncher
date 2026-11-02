@@ -200,7 +200,9 @@ final class ChatGptAuth {
                                URLDecoder.decode(kv[1], "UTF-8"));
             }
             byte[] body = ("<html><body style=\"font-family:sans-serif;padding:40px\">"
-                    + "<h2>Return to Quiet Launcher</h2><p>You can close this tab.</p>"
+                    + "<h2>Authorization received</h2>"
+                    + "<p>Return to Quiet Launcher to check whether your connection finished.</p>"
+                    + "<p>This browser page does not confirm that the app is connected.</p>"
                     + "</body></html>").getBytes(StandardCharsets.UTF_8);
             byte[] headers = ("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8"
                     + "\r\nCache-Control: no-store\r\nContent-Length: " + body.length
@@ -312,6 +314,21 @@ final class ChatGptAuth {
         return URLEncoder.encode(value, "UTF-8");
     }
     private static JSONObject formPost(String endpoint, String... fields) throws Exception {
+        // Browser approval is not the end of sign-in: a second HTTPS request
+        // exchanges the short-lived authorization code. A transient DNS lookup
+        // failure should not immediately discard an otherwise valid attempt.
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                return formPostOnce(endpoint, fields);
+            } catch (java.net.UnknownHostException ex) {
+                if (attempt == 2) throw ex;
+                Thread.sleep(attempt == 0 ? 500L : 1300L);
+            }
+        }
+        throw new IllegalStateException("Token exchange failed");
+    }
+
+    private static JSONObject formPostOnce(String endpoint, String... fields) throws Exception {
         StringBuilder body = new StringBuilder();
         for (int i=0; i<fields.length; i+=2) {
             if (i>0) body.append('&');
@@ -335,6 +352,18 @@ final class ChatGptAuth {
     }
 
     static JSONObject getJson(String endpoint, String bearer) throws Exception {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                return getJsonOnce(endpoint, bearer);
+            } catch (java.net.UnknownHostException ex) {
+                if (attempt == 2) throw ex;
+                Thread.sleep(attempt == 0 ? 500L : 1300L);
+            }
+        }
+        throw new IllegalStateException("Network request failed");
+    }
+
+    private static JSONObject getJsonOnce(String endpoint, String bearer) throws Exception {
         HttpURLConnection c = (HttpURLConnection)new URL(endpoint).openConnection();
         c.setInstanceFollowRedirects(false);
         c.setConnectTimeout(10000);
@@ -395,10 +424,20 @@ final class ChatGptAuth {
         return generator.generateKey();
     }
     private static String friendlyError(Exception e) {
-        if(e instanceof java.net.SocketTimeoutException)
-            return "No browser callback received. Sign-in timed out.";
-        if(e instanceof SecurityException) return "Security check failed. Please try again.";
-        return e.getMessage()==null?"Unable to finish sign-in.":e.getMessage();
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.net.UnknownHostException)
+                return "DNS lookup failed for auth.openai.com. Browser approval may have succeeded, "
+                    + "but Quiet could not exchange the code. Try mobile data instead of Wi-Fi, "
+                    + "or check VPN/Private DNS settings. Use Check in Browser to test.";
+            if (cause instanceof java.net.SocketTimeoutException)
+                return "Network or browser callback timed out. Check your connection and try again.";
+            if (cause instanceof java.net.ConnectException)
+                return "Could not establish a connection to OpenAI authentication. "
+                    + "Try a different network, then sign in again.";
+        }
+        if (e instanceof SecurityException)
+            return "A security validation failed. Your connection was not saved.";
+        return e.getMessage() == null ? "Unable to finish sign-in." : e.getMessage();
     }
     private static void finish(Handler ui, Callback cb, boolean good, String message) {
         ui.post(() -> cb.finished(good,message));
