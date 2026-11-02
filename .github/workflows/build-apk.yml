@@ -33,6 +33,11 @@ jobs:
             app/src/main/java/dev/quiet/launcher/IntentRouter.java \
             app/src/test/java/dev/quiet/launcher/IntentRouterTest.java
           java -cp /tmp/quiet-intent-tests dev.quiet.launcher.IntentRouterTest
+          javac -d /tmp/quiet-intent-tests \
+            app/src/main/java/dev/quiet/launcher/IntentRouter.java \
+            app/src/main/java/dev/quiet/launcher/ActionPolicy.java \
+            app/src/test/java/dev/quiet/launcher/ActionPolicyTest.java
+          java -cp /tmp/quiet-intent-tests dev.quiet.launcher.ActionPolicyTest
       - name: Assemble installable debug APK
         run: gradle --no-daemon :app:assembleDebug
       - name: Upload APK

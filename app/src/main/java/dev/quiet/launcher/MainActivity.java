@@ -3,6 +3,7 @@ package dev.quiet.launcher;
 import android.app.Activity;
 import android.app.SearchManager;
 import android.speech.RecognizerIntent;
+import android.content.ActivityNotFoundException;
 import android.app.AlertDialog;
 import android.app.AppOpsManager;
 import android.app.KeyguardManager;
@@ -428,6 +429,8 @@ public final class MainActivity extends Activity {
         commandButtons.addView(speak, micParams);
         run.setContentDescription("Run local command");
         add(commandCard, commandButtons, 11);
+        TextView askAi = pill("ASK AI  ✧  OPTIONAL", () -> requestAiPlan(command.getText().toString()));
+        add(commandCard, askAi, 9);
         add(main, commandCard, 13);
         add(main, text("Local action router. Tap Speak for Android's speech service (it may use the network). No always-on listening.",
                 11, muted, false), 8);
@@ -555,6 +558,124 @@ public final class MainActivity extends Activity {
                     .edit().putInt("minutes", minutes).apply();
         }
         openTraining();
+    }
+
+    // Only the explicitly entered text is sent to a configured HTTPS gateway.
+    private void requestAiPlan(String input) {
+        String query = input.trim();
+        if (query.isEmpty() || query.length() > 220) {
+            Toast.makeText(this, "Enter 1-220 characters first", Toast.LENGTH_LONG).show();
+            return;
+        }
+        SharedPreferences gateway = getSharedPreferences("quiet_gateway_config_v1", MODE_PRIVATE);
+        String endpoint = gateway.getString("endpoint", "");
+        if (!CloudPlanClient.validEndpoint(endpoint) || !GatewaySecrets.configured(this)) {
+            new AlertDialog.Builder(this).setTitle("AI gateway not configured")
+                    .setMessage("Set your private HTTPS /plan endpoint and gateway access token in Settings. Offline commands work without this.")
+                    .setPositiveButton("Configure", (d, w) -> configureGateway())
+                    .setNegativeButton("Cancel", null).show();
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("Send this command to your AI gateway?")
+                .setMessage(query + "\n\nOnly this text will be sent. Your gateway forwards it to its model provider and may incur costs.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Send", (d, w) -> {
+                    Toast.makeText(this, "Requesting a plan...", Toast.LENGTH_SHORT).show();
+                    background.execute(() -> {
+                        try {
+                            String token = GatewaySecrets.read(this);
+                            List<IntentRouter.Step> response = CloudPlanClient.request(endpoint, token, query);
+                            handler.post(() -> {
+                                if (isFinishing() || isDestroyed()) return;
+                                List<String> allowed = new ArrayList<>();
+                                for (App app : apps) if (!getSet("hidden").contains(app.packageName))
+                                    allowed.add(app.name);
+                                IntentRouter.Plan plan = ActionPolicy.validate(query, response, allowed);
+                                if (!plan.valid()) {
+                                    new AlertDialog.Builder(this).setTitle("Plan rejected")
+                                            .setMessage(plan.error).setPositiveButton("OK", null).show();
+                                    return;
+                                }
+                                previewPlan(plan);
+                            });
+                        } catch (Exception ex) {
+                            handler.post(() -> {
+                                if (!isFinishing() && !isDestroyed())
+                                    new AlertDialog.Builder(this).setTitle("AI planner unavailable")
+                                            .setMessage("Your request was not executed. Check the gateway URL, token and server availability. Local commands still work.")
+                                            .setPositiveButton("OK", null).show();
+                            });
+                        }
+                    });
+                }).show();
+    }
+
+    private void previewPlan(IntentRouter.Plan plan) {
+        StringBuilder preview = new StringBuilder();
+        for (int i = 0; i < plan.steps.size(); i++)
+            preview.append(i + 1).append(". ").append(plan.steps.get(i).description()).append("\n");
+        new AlertDialog.Builder(this).setTitle("Review AI action plan")
+                .setMessage(preview.toString().trim())
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("RUN PLAN", (d, w) -> {
+                    // App/permission constraints can change while a dialog is open.
+                    List<String> allowed = new ArrayList<>();
+                    for (App app : apps) if (!getSet("hidden").contains(app.packageName))
+                        allowed.add(app.name);
+                    IntentRouter.Plan safe = ActionPolicy.validate(plan.original, plan.steps, allowed);
+                    if (safe.valid()) executePlan(safe);
+                    else Toast.makeText(this, "Plan no longer valid", Toast.LENGTH_LONG).show();
+                }).show();
+    }
+
+    private void configureGateway() {
+        SharedPreferences cfg = getSharedPreferences("quiet_gateway_config_v1", MODE_PRIVATE);
+        LinearLayout fields = column();
+        fields.setPadding(dp(22), dp(8), dp(22), dp(4));
+        EditText url = new EditText(this);
+        url.setSingleLine(true); url.setTextColor(ink); url.setHintTextColor(muted);
+        url.setTextSize(14); url.setHint("https://your-server.example/plan");
+        url.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        url.setText(cfg.getString("endpoint", ""));
+        fields.addView(url);
+        EditText token = new EditText(this);
+        token.setSingleLine(true); token.setTextColor(ink); token.setHintTextColor(muted);
+        token.setTextSize(14); token.setHint(GatewaySecrets.configured(this)
+                ? "Saved token (leave blank to keep)" : "Gateway access token");
+        token.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        fields.addView(token);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Optional AI gateway")
+                .setMessage("Configure your own HTTPS server. Never put an OpenAI API key here.")
+                .setView(fields)
+                .setNegativeButton("Cancel", null)
+                .setNeutralButton("Disconnect", (d, w) -> {
+                    GatewaySecrets.clear(this);
+                    cfg.edit().remove("endpoint").apply();
+                    Toast.makeText(this, "AI gateway disconnected", Toast.LENGTH_SHORT).show();
+                })
+                .setPositiveButton("Save", null).create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String target = url.getText().toString().trim();
+            if (!CloudPlanClient.validEndpoint(target)) {
+                url.setError("Use an HTTPS URL ending in /plan"); return;
+            }
+            try {
+                String value = token.getText().toString();
+                if (!value.isEmpty()) GatewaySecrets.save(this, value);
+                if (!GatewaySecrets.configured(this)) {
+                    token.setError("Enter your gateway access token"); return;
+                }
+                cfg.edit().putString("endpoint", target).apply();
+                Toast.makeText(this, "Gateway settings saved", Toast.LENGTH_SHORT).show();
+                dialog.dismiss();
+            } catch (Exception e) {
+                token.setError("Could not securely save token");
+            }
+        }));
+        dialog.show();
     }
 
     private void runSmartCommand(String input) {
@@ -1094,6 +1215,8 @@ public final class MainActivity extends Activity {
         section(main, "HOME", null, null);
         setting("Classic home", "Original dashboard and essential app tiles", () -> show("classic"));
         setting("Intent-first home", "Default home · local commands and recommendations", () -> show("home"));
+        section(main, "AI PLANNER", null, null);
+        setting("Configure AI gateway", "Optional HTTPS server · explicit sharing only", this::configureGateway);
         section(main, "WORKSPACE", null, null);
         setting("Open in Quiet", "Read, edit and work with shared text and links", this::openWorkspace);
         section(main, "PHONE", null, null);
@@ -1108,7 +1231,7 @@ public final class MainActivity extends Activity {
         setting("Manage Android widgets", "Choose useful home widgets", () -> show("widgets"));
         section(main, "ABOUT", null, null);
         LinearLayout about = card();
-        add(about, text("Quiet 0.5.0 — intent-first home", 14, ink, true), 0);
+        add(about, text("Quiet 0.7.0 — optional model planner", 14, ink, true), 0);
         add(about, text("Offline by default. No subscription, account, analytics or ad SDK. Notifications are handled by Android. App hiding and protection only apply inside Quiet.", 12, muted, false), 8);
         add(main, about, 10); space(main, 25);
     }
