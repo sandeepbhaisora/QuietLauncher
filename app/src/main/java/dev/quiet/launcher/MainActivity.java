@@ -473,6 +473,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout hero = card();
         hero.setPadding(dp(14), dp(18), dp(14), dp(18));
+        hero.setBackground(shape(c("#081C2A"), 18, c("#167B95")));
         LinearLayout heroRow = row();
         LinearLayout copy = column();
         add(copy, label("QUIET  /  INTENT HOME"), 0);
@@ -492,6 +493,19 @@ public final class MainActivity extends Activity {
         heroRow.addView(face, new LinearLayout.LayoutParams(dp(92), dp(108)));
         hero.addView(heroRow);
         add(main, hero, 7);
+        AiHudView hud = new AiHudView(this);
+        hud.setContentDescription("Animated Quiet OS AI core. Open assistant");
+        hud.setOnClickListener(v -> openLonde());
+        LinearLayout hudCard = card();
+        hudCard.setBackground(shape(c("#061722"), 18, c("#14738C")));
+        TextView hudLabel = text("QUIET OS  //  AI CORE", 12, c("#5BDFF5"), true);
+        hudLabel.setLetterSpacing(.17f);
+        add(hudCard, hudLabel, 0);
+        hudCard.addView(hud, new LinearLayout.LayoutParams(-1, dp(230)));
+        add(hudCard, text("OFFLINE HOTWORD ENGINE · NOT YET INSTALLED", 11,
+                c("#7EAEBB"), false), 0);
+        add(hudCard, pill("OPEN LONDE CONSOLE  ↗", this::openLonde), 12);
+        add(main, hudCard, 10);
         LinearLayout aiPanel=card();
         londeStatus=text(wakeState,12,accent,true);
         add(aiPanel,londeStatus,6);
