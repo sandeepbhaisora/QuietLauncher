@@ -454,7 +454,9 @@ public final class WorkspaceActivity extends Activity {
 
         LinearLayout navigation = row();
         for (String candidate : new String[]{"overview", "content", "actions"}) {
-            TextView tab = button(candidate.toUpperCase(Locale.ROOT), () -> {
+            String caption = candidate.equals("overview") ? "EXPLORE"
+                    : candidate.equals("content") ? "READ" : "ACTIONS";
+            TextView tab = button(caption, () -> {
                 page = candidate;
                 render();
             });
@@ -477,39 +479,55 @@ public final class WorkspaceActivity extends Activity {
     }
 
     private void renderOverview() {
-        heading("Open anything.", "One interface for content you choose to share.");
+        heading("Explore.", "One workspace for whatever you open.");
         if (loading) {
-            cardText("Reading", "Loading your shared text file locally...");
+            cardText("Reading", "Loading your selected text file locally...");
             return;
         }
         if (text.isEmpty()) {
-            cardText("Start here", "Open a webpage in Chrome or text in another app, tap Share, then choose Open in Quiet.");
-            add(body, button("PASTE FROM CLIPBOARD", this::paste), 16);
+            cardText("Open in Quiet", "Share a link or selected text from Chrome, GitHub, Notes or another Android app.");
+            add(body, button("PICK A TEXT / CODE FILE", this::openTextFile), 15);
+            add(body, button("PASTE FROM CLIPBOARD", this::paste), 10);
             add(body, button("OPEN SAVED WORKSPACE", this::restore), 10);
             return;
         }
-        cardText(sourceLabel, link.isEmpty() ? typeLabel() + "  ·  " + text.length()
-                + " characters" : "Website · " + hostName());
-        if (truncated) cardText("Preview limited", "Only the first 24,000 characters are displayed.");
-        add(body, label("PREVIEW", 11, true), 21);
-        TextView preview = label(text.length() > 1300 ? text.substring(0, 1300) + "..." : text, 14, false);
-        preview.setTextIsSelectable(true);
-        preview.setPadding(dp(14), dp(15), dp(14), dp(15));
-        preview.setBackground(shape(surface, true));
-        add(body, preview, 9);
-        add(body, button("READ / EDIT CONTENT", () -> { page = "content"; render(); }), 15);
-        add(body, button("VIEW ACTIONS", () -> { page = "actions"; render(); }), 10);
-        add(body, button("SAVE LOCALLY", this::save), 10);
+        String type = kind();
+        cardText(sourceLabel, type + "  ·  " + text.length() + " characters");
+        if (truncated) cardText("Length limit", "Only the first 24,000 characters were imported.");
+        if (type.equals("Link")) {
+            cardText(hostName(), "This is a shared link, not downloaded webpage content.");
+            add(body, button("OPEN ORIGINAL WEBSITE", this::openLink), 13);
+            add(body, button("COPY LINK", this::copy), 8);
+            add(body, button("DISCUSS LINK WITH CHATGPT", () ->
+                    sendToChatGPT("Here is a link. If you can access it, explain its contents. If not, tell me that you cannot access it.")), 8);
+        } else if (type.equals("Code") || type.equals("Document")) {
+            cardText(type.equals("Code") ? "Code explorer" : "Document outline",
+                    "Tap a symbol or heading to focus on it without precise text selection.");
+            renderOutline();
+            add(body, button("READ FULL CONTENT", () -> {
+                focusedStart = -1;
+                focusedEnd = -1;
+                focusedTitle = "";
+                page = "content";
+                render();
+            }), 15);
+            if (type.equals("Code")) add(body, button("REVIEW CODE IN CHATGPT", () ->
+                    sendToChatGPT("Review this code for correctness and readability. Suggest focused changes.")), 10);
+        } else {
+            add(body, label("PREVIEW", 11, true), 21);
+            TextView preview = label(text.length() > 1000 ? text.substring(0, 1000) + "..." : text, 14, false);
+            preview.setTextIsSelectable(true);
+            preview.setPadding(dp(14), dp(15), dp(14), dp(15));
+            preview.setBackground(shape(surface, true));
+            add(body, preview, 9);
+            add(body, button("READ / EDIT CONTENT", () -> { page = "content"; render(); }), 15);
+        }
+        add(body, button("OTHER ACTIONS", () -> { page = "actions"; render(); }), 12);
+        add(body, button("SAVE WORKSPACE LOCALLY", this::save), 10);
+        add(body, button("OPEN ANOTHER TEXT FILE", this::openTextFile), 10);
     }
 
-    private String typeLabel() {
-        String candidate = text.trim();
-        if (candidate.contains("public class ") || candidate.contains("import java.")
-                || candidate.contains("function ") || candidate.contains("const ")
-                || candidate.contains("def ")) return "Code-like text";
-        if (candidate.contains("\n# ") || candidate.startsWith("# ")) return "Structured text";
-        return "Text";
-    }
+    private String typeLabel() { return kind(); }
 
     private String hostName() {
         try { return new URI(link).getHost(); }
@@ -517,43 +535,69 @@ public final class WorkspaceActivity extends Activity {
     }
 
     private void renderContent() {
-        heading("Content.", "Select, edit or copy without navigating a desktop UI.");
+        String active = focusedContent();
+        heading(focusedStart >= 0 ? "Focused view." : "Read.",
+                focusedStart >= 0 ? focusedTitle : "Select, copy or edit your content.");
         if (text.isEmpty()) {
-            cardText("Nothing opened yet", "Share text or a URL to Quiet, or paste from the clipboard.");
-            add(body, button("PASTE FROM CLIPBOARD", this::paste), 15);
+            cardText("Nothing opened yet", "Share text or a link, or choose a local text file.");
+            add(body, button("PICK A TEXT FILE", this::openTextFile), 15);
+            add(body, button("PASTE FROM CLIPBOARD", this::paste), 10);
             return;
         }
-        TextView content = label(text, 14, false);
+        if (focusedStart >= 0) {
+            cardText("Symbol / section", "This is an extracted excerpt, not an AI-generated summary.");
+            add(body, button("SHOW WHOLE DOCUMENT", () -> {
+                focusedStart = -1;
+                focusedEnd = -1;
+                focusedTitle = "";
+                render();
+            }), 12);
+        }
+        TextView content = label(active, 14, false);
         content.setTextIsSelectable(true);
         content.setPadding(dp(13), dp(15), dp(13), dp(15));
         content.setBackground(shape(surface, true));
-        if ("Code-like text".equals(typeLabel())) {
+        if (kind().equals("Code")) {
             content.setTypeface(Typeface.MONOSPACE);
             content.setTextSize(13);
         }
         add(body, content, 12);
-        add(body, button("EDIT TEXT", this::edit), 14);
-        add(body, button("COPY TEXT", this::copy), 10);
+        add(body, button("EDIT FULL TEXT", this::edit), 14);
+        add(body, button(focusedStart >= 0 ? "COPY THIS SECTION" : "COPY TEXT", this::copy), 10);
+        if (focusedStart >= 0) {
+            add(body, button("ASK CHATGPT ABOUT THIS SECTION", () ->
+                    sendToChatGPT("Explain this selected section and suggest improvements if applicable.")), 10);
+        }
     }
 
     private void renderActions() {
-        heading("Do something.", "Actions only run when you choose them.");
+        heading("Actions.", "Choose exactly what Quiet should do.");
         if (text.isEmpty()) {
-            cardText("No content", "Share something to Quiet to unlock relevant actions.");
-            add(body, button("PASTE FROM CLIPBOARD", this::paste), 12);
+            cardText("No content", "Share something, select a text file, or paste.");
+            add(body, button("PICK A TEXT FILE", this::openTextFile), 12);
+            add(body, button("PASTE FROM CLIPBOARD", this::paste), 10);
             return;
         }
-        if (!link.isEmpty()) add(body, button("OPEN LINK IN BROWSER", this::openLink), 14);
-        add(body, button("ASK CHATGPT TO SUMMARIZE", () -> sendToChatGPT("Summarize the following content.")), 12);
-        add(body, button("ASK CHATGPT TO EXPLAIN", () -> sendToChatGPT("Explain the following clearly.")), 10);
-        if ("Code-like text".equals(typeLabel()))
+        if (!link.isEmpty()) add(body, button("OPEN ORIGINAL LINK", this::openLink), 12);
+        if (kind().equals("Link")) {
+            add(body, button("ASK CHATGPT ABOUT LINK", () ->
+                    sendToChatGPT("Here is a URL. If you cannot access it, tell me rather than guessing its contents.")), 10);
+        } else {
+            add(body, button("ASK CHATGPT TO SUMMARIZE", () ->
+                    sendToChatGPT("Summarize this content.")), 12);
+            add(body, button("ASK CHATGPT TO EXPLAIN", () ->
+                    sendToChatGPT("Explain this content in simple, accurate terms.")), 10);
+        }
+        if (kind().equals("Code")) {
             add(body, button("ASK CHATGPT TO REVIEW CODE", () ->
-                    sendToChatGPT("Review this code. Identify issues, suggest concrete improvements.")), 10);
-        add(body, button("COPY", this::copy), 10);
-        add(body, button("EDIT", this::edit), 10);
-        add(body, button("SAVE TO QUIET", this::save), 10);
+                    sendToChatGPT("Review this code and identify concrete issues.")), 10);
+        }
+        add(body, button(focusedStart >= 0 ? "COPY FOCUSED SECTION" : "COPY CONTENT", this::copy), 10);
+        add(body, button("EDIT FULL TEXT", this::edit), 10);
+        add(body, button("SAVE LOCALLY", this::save), 10);
+        add(body, button("IMPORT ANOTHER FILE", this::openTextFile), 10);
         add(body, button("CLEAR CURRENT CONTENT", this::clear), 10);
-        cardText("Privacy", "Quiet does not upload shared content. Asking ChatGPT explicitly sends it to the selected application via Android's share system. No API key or paid API is used.");
+        cardText("Privacy & cost", "Quiet reads selected content locally. Sending text to ChatGPT happens only after you tap Ask ChatGPT. No separate API or billing is used.");
     }
 
     private void edit() {
@@ -596,7 +640,7 @@ public final class WorkspaceActivity extends Activity {
 
     private void copy() {
         ((ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE))
-                .setPrimaryClip(ClipData.newPlainText("Quiet content", text));
+                .setPrimaryClip(ClipData.newPlainText("Quiet content", focusedContent()));
         toast("Copied");
     }
 
@@ -631,7 +675,7 @@ public final class WorkspaceActivity extends Activity {
     }
 
     private void sendToChatGPT(String request) {
-        String message = request + "\n\n" + text;
+        String message = request + "\n\n" + focusedContent();
         // User must explicitly tap the action. Never send automatically.
         Intent share = new Intent(Intent.ACTION_SEND);
         share.setType("text/plain");
