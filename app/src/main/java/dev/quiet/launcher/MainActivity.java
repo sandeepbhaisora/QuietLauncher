@@ -150,7 +150,8 @@ public final class MainActivity extends Activity {
         widgetManager = AppWidgetManager.getInstance(this);
         widgetHost = new AppWidgetHost(this, WIDGET_HOST_ID);
         setPalette();
-        londeSpeech=new TextToSpeech(this,code->{
+        initHomeVoice();
+        /*londeSpeech=new TextToSpeech(this,code->{
             voiceReady=code==TextToSpeech.SUCCESS;
             if(voiceReady){
                 londeSpeech.setLanguage(Locale.getDefault());
@@ -164,7 +165,7 @@ public final class MainActivity extends Activity {
                     }
                 });
             }
-        });
+        });*/
         render();
         refreshAsync();
         if(getIntent()!=null){
@@ -771,6 +772,80 @@ public final class MainActivity extends Activity {
                 else{show("home");startWakeIfAllowed();}
             }).show();
     }
+    private void initHomeVoice(){
+        if(londeSpeech!=null){londeSpeech.stop();londeSpeech.shutdown();}
+        voiceReady=false;
+        SharedPreferences voice=getSharedPreferences("londe_voice_v1",MODE_PRIVATE);
+        String engine=voice.getString("tts_engine","");
+        TextToSpeech.OnInitListener callback=code->{
+            voiceReady=code==TextToSpeech.SUCCESS;
+            if(!voiceReady)return;
+            londeSpeech.setLanguage(Locale.getDefault());
+            londeSpeech.setSpeechRate(0.95f);
+            String preferred=voice.getString("tts_voice","");
+            if(!preferred.isEmpty()&&londeSpeech.getVoices()!=null)
+                for(android.speech.tts.Voice v:londeSpeech.getVoices())
+                    if(preferred.equals(v.getName())){londeSpeech.setVoice(v);break;}
+            londeSpeech.setOnUtteranceProgressListener(new UtteranceProgressListener(){
+                @Override public void onStart(String id){}
+                @Override public void onDone(String id){handler.post(()->voiceCompleted(id));}
+                @Override public void onError(String id){handler.post(()->voiceCompleted(id));}
+            });
+        };
+        londeSpeech=engine.isEmpty()?new TextToSpeech(this,callback):
+            new TextToSpeech(this,callback,engine);
+    }
+    private void configureLondeVoice(){
+        new AlertDialog.Builder(this).setTitle("Londe voice")
+            .setMessage("Quiet can use any installed Android text-to-speech engine. For a free offline neural voice, install Marmalade TTS, download a voice inside Marmalade, then select it here. No API key is needed.")
+            .setPositiveButton("Install Marmalade",(d,w)->startSafe(
+                new Intent(Intent.ACTION_VIEW,Uri.parse(
+                    "https://f-droid.org/packages/app.marmalade.tts/"))))
+            .setNeutralButton("Select engine",(d,w)->selectLondeEngine())
+            .setNegativeButton("Cancel",null).show();
+    }
+    private void selectLondeEngine(){
+        if(londeSpeech==null||!voiceReady){
+            Toast.makeText(this,"Voice engine is initializing",Toast.LENGTH_LONG).show();return;
+        }
+        List<TextToSpeech.EngineInfo> engines=londeSpeech.getEngines();
+        if(engines==null||engines.isEmpty())return;
+        String[] labels=new String[engines.size()];
+        for(int i=0;i<labels.length;i++)labels[i]=engines.get(i).label;
+        new AlertDialog.Builder(this).setTitle("Choose speech engine")
+            .setItems(labels,(d,index)->{
+                getSharedPreferences("londe_voice_v1",MODE_PRIVATE).edit()
+                    .putString("tts_engine",engines.get(index).name).remove("tts_voice").apply();
+                initHomeVoice();
+                Toast.makeText(this,"Engine selected. Reopen Voice settings to test a voice.",Toast.LENGTH_LONG).show();
+            })
+            .setNeutralButton("Choose voice",(d,w)->selectLondeVoice())
+            .setNegativeButton("Cancel",null).show();
+    }
+    private void selectLondeVoice(){
+        if(londeSpeech==null||!voiceReady)return;
+        List<android.speech.tts.Voice> voices=new ArrayList<>();
+        if(londeSpeech.getVoices()!=null)
+            for(android.speech.tts.Voice v:londeSpeech.getVoices())
+                if(v.getLocale().getLanguage().equals(Locale.getDefault().getLanguage()))
+                    voices.add(v);
+        if(voices.isEmpty()){
+            Toast.makeText(this,"No voices installed for this language",Toast.LENGTH_LONG).show();
+            return;
+        }
+        String[] labels=new String[voices.size()];
+        for(int i=0;i<labels.length;i++)labels[i]=voices.get(i).getName();
+        new AlertDialog.Builder(this).setTitle("Choose voice")
+            .setItems(labels,(d,index)->{
+                android.speech.tts.Voice chosen=voices.get(index);
+                londeSpeech.setVoice(chosen);
+                getSharedPreferences("londe_voice_v1",MODE_PRIVATE).edit()
+                    .putString("tts_voice",chosen.getName()).apply();
+                londeSpeech.speak("Haan bhai, main Londe hoon. Kaisa laga?",
+                    TextToSpeech.QUEUE_FLUSH,null,"voice-preview");
+            }).setNegativeButton("Cancel",null).show();
+    }
+
     private void voiceCompleted(String id){
         londeSpeaking=false;
         if(id!=null && id.startsWith("londe-wake")){
@@ -1650,6 +1725,7 @@ public final class MainActivity extends Activity {
         setting("Voice wake: Hey Londe", prefs.getBoolean("londe_wake_enabled",false)
             ? "Enabled on Home (foreground only)" : "Off · opt-in on-device recognition",
             () -> configureWake());
+        setting("Londe voice engine", "Choose offline voice · free neural TTS option", this::configureLondeVoice);
         setting("Londe assistant", "Voice-first assistant · answers and device commands", this::openLonde);
         section(main, "CHATGPT", null, null);
         setting(ChatGptAuth.isConnected(this) ? "ChatGPT account · Connected" : "Connect ChatGPT",
