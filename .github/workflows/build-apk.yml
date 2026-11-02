@@ -26,6 +26,13 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+      - name: Test local intent router (JVM)
+        run: |
+          mkdir -p /tmp/quiet-intent-tests
+          javac -d /tmp/quiet-intent-tests \
+            app/src/main/java/dev/quiet/launcher/IntentRouter.java \
+            app/src/test/java/dev/quiet/launcher/IntentRouterTest.java
+          java -cp /tmp/quiet-intent-tests dev.quiet.launcher.IntentRouterTest
       - name: Assemble installable debug APK
         run: gradle --no-daemon :app:assembleDebug
       - name: Upload APK
