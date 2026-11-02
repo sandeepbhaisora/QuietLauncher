@@ -106,6 +106,7 @@ public final class MainActivity extends Activity {
     private TextView focusLive, clockLive;
     private boolean hasUsage;
     private boolean initialResumePending = true;
+    private boolean setupPromptScheduled;
     private long lastRefreshElapsed;
 
     private static final class App {
@@ -134,6 +135,12 @@ public final class MainActivity extends Activity {
         setPalette();
         render();
         refreshAsync();
+        // A one-time welcome prompt, not a forced login. Existing installations
+        // are also offered it once, without resetting any saved launcher data.
+        if (state == null && !setupPromptScheduled) {
+            setupPromptScheduled = true;
+            handler.postDelayed(this::maybeShowWelcome, 800);
+        }
         handler.postDelayed(new Runnable() {
             @Override public void run() {
                 updateFocusClock();
@@ -563,27 +570,54 @@ public final class MainActivity extends Activity {
         openTraining();
     }
 
-    private void chatGptAccountDialog() {
-        boolean connected=ChatGptAuth.isConnected(this);
+    private void maybeShowWelcome() {
+        if (isFinishing() || isDestroyed() || prefs.getBoolean("welcome_chatgpt_v081", false))
+            return;
+        prefs.edit().putBoolean("welcome_chatgpt_v081", true).apply();
+        if (ChatGptAuth.isConnected(this)) return;
         new AlertDialog.Builder(this)
-            .setTitle(connected ? "ChatGPT account" : "Connect with ChatGPT")
-            .setMessage(connected ? ChatGptAuth.account(this) +
-                "\n\nAccount usage permission: " +
-                (ChatGptAuth.canUsePlan(this) ? "Granted" : "Not granted") :
-                "Sign in through OpenAI in your browser. Quiet will not see your password. " +
-                "An eligible ChatGPT plan and account approval are required.")
-            .setNegativeButton("Cancel",null)
-            .setNeutralButton(connected ? "Disconnect" : "Learn later",(d,w)-> {
-                if (connected) {ChatGptAuth.disconnect(this); render();}
-            })
-            .setPositiveButton(connected ? "Sign in again" : "Sign in", (d,w)-> {
-                Toast.makeText(this,"Opening ChatGPT sign-in...",Toast.LENGTH_SHORT).show();
-                ChatGptAuth.signIn(this,background,handler,(ok,message)-> {
-                    new AlertDialog.Builder(this).setTitle(ok?"ChatGPT":"Sign-in unsuccessful")
-                            .setMessage(message).setPositiveButton("OK",null).show();
-                    if(ok)render();
-                });
-            }).show();
+            .setTitle("Welcome to Quiet")
+            .setMessage("Keep your phone calm and useful. Connect ChatGPT to try AI planning, or continue offline. Sign-in is optional and you can connect later in Settings.")
+            .setNegativeButton("Continue offline", null)
+            .setPositiveButton("Connect ChatGPT", (d, w) -> beginChatGptSignIn())
+            .show();
+    }
+
+    private void beginChatGptSignIn() {
+        Toast.makeText(this, "Opening ChatGPT sign-in...", Toast.LENGTH_SHORT).show();
+        ChatGptAuth.signIn(this, background, handler, (ok, message) -> {
+            if (isFinishing() || isDestroyed()) return;
+            new AlertDialog.Builder(this)
+                .setTitle(ok ? "ChatGPT connected" : "Connection not completed")
+                .setMessage(message)
+                .setPositiveButton("OK", null).show();
+            if (ok) render();
+        });
+    }
+
+    private void chatGptAccountDialog() {
+        boolean connected = ChatGptAuth.isConnected(this);
+        boolean permitted = connected && ChatGptAuth.canUsePlan(this);
+        AlertDialog.Builder dialog = new AlertDialog.Builder(this);
+        if (connected) {
+            dialog.setTitle("ChatGPT connected")
+                .setMessage(ChatGptAuth.account(this) + "\n\n" +
+                    (permitted ? "AI planning permission: granted." :
+                    "Signed in, but AI planning permission isn't available for this connection."))
+                .setPositiveButton(permitted ? "Done" : "Review permissions",
+                    (d, w) -> { if (!permitted) beginChatGptSignIn(); })
+                .setNeutralButton("Disconnect", (d, w) -> {
+                    ChatGptAuth.disconnect(this);
+                    render();
+                })
+                .setNegativeButton("Cancel", null);
+        } else {
+            dialog.setTitle("Connect ChatGPT")
+                .setMessage("Sign in through OpenAI in your browser. Quiet never sees your password. Connecting is optional.")
+                .setPositiveButton("Sign in", (d, w) -> beginChatGptSignIn())
+                .setNegativeButton("Not now", null);
+        }
+        dialog.show();
     }
 
     private void requestChatGptPlan(String input) {
@@ -592,7 +626,15 @@ public final class MainActivity extends Activity {
             Toast.makeText(this,"Enter a command up to 220 characters",Toast.LENGTH_LONG).show();
             return;
         }
-        if(!ChatGptAuth.canUsePlan(this)){chatGptAccountDialog();return;}
+        if (!ChatGptAuth.canUsePlan(this)) {
+            if (ChatGptAuth.isConnected(this)) {
+                new AlertDialog.Builder(this).setTitle("ChatGPT connected")
+                    .setMessage("Your connection is saved, but AI planning permission is not granted. Review it in Settings.")
+                    .setPositiveButton("Review", (d,w) -> chatGptAccountDialog())
+                    .setNegativeButton("Cancel", null).show();
+            } else chatGptAccountDialog();
+            return;
+        }
         new AlertDialog.Builder(this).setTitle("Ask ChatGPT to plan?")
             .setMessage("Send only this text to OpenAI?\n\n"+query+
                 "\n\nYou will review any proposed actions before they run.")
