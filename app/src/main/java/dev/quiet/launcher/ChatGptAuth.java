@@ -37,6 +37,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
@@ -58,8 +60,16 @@ final class ChatGptAuth {
     private static final String KEY = "quiet_chatgpt_keystore_v1";
     private static final String SCOPE = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
     private static final SecureRandom RNG = new SecureRandom();
+    // The browser can finish its loopback callback while Quiet is backgrounded.
+    // Samsung/Android may defer the app's network work until it is foregrounded.
+    private static volatile CountDownLatch waitForAppForeground;
 
     private ChatGptAuth() {}
+
+    static void onLauncherResumed() {
+        CountDownLatch pending = waitForAppForeground;
+        if (pending != null) pending.countDown();
+    }
 
     static boolean isConnected(Context context) {
         try { return readSession(context) != null; }
@@ -153,6 +163,29 @@ final class ChatGptAuth {
                         throw new IllegalStateException("Could not save ChatGPT registration");
                 } else if (callbackClient != null && !callbackClient.equals(issued))
                     throw new SecurityException("OAuth client ID changed");
+
+                // Loopback HTTP callback happens inside Chrome. Do not exchange
+                // the short-lived code from a backgrounded launcher process.
+                // Wait for the user to return to Quiet, then use its active network.
+                stage = "Wait for Quiet to return";
+                CountDownLatch foreground = new CountDownLatch(1);
+                waitForAppForeground = foreground;
+                try {
+                    ui.post(() -> {
+                        if (activity.hasWindowFocus()) foreground.countDown();
+                    });
+                    if (!foreground.await(90000, TimeUnit.MILLISECONDS))
+                        throw new IllegalStateException(
+                            "Return to Quiet immediately after browser approval to finish sign-in.");
+                } finally {
+                    waitForAppForeground = null;
+                }
+
+                // Verify DNS and HTTPS again in the resumed launcher before
+                // consuming a one-time code. No authorization data is sent here.
+                stage = "Check authentication connectivity after browser return";
+                getJson(activity,
+                        "https://auth.openai.com/.well-known/openid-configuration", null);
                 stage = "Exchange authorization code";
                 JSONObject tokens = formPost(activity, TOKEN_URL,
                     "grant_type", "authorization_code",
@@ -217,8 +250,10 @@ final class ChatGptAuth {
             }
             byte[] body = ("<html><body style=\"font-family:sans-serif;padding:40px\">"
                     + "<h2>Authorization received</h2>"
-                    + "<p>Return to Quiet Launcher to check whether your connection finished.</p>"
-                    + "<p>This browser page does not confirm that the app is connected.</p>"
+                    + "<p>Return to Quiet Launcher now to complete the secure sign-in.</p>"
+                    + "<p><a style=\"font-size:20px\" href=\"quiet://auth-return\">"
+                    + "Return to Quiet</a></p>"
+                    + "<p>This page alone does not mean your account is connected.</p>"
                     + "</body></html>").getBytes(StandardCharsets.UTF_8);
             byte[] headers = ("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8"
                     + "\r\nCache-Control: no-store\r\nContent-Length: " + body.length
@@ -346,16 +381,20 @@ final class ChatGptAuth {
 
     private static JSONObject formPost(Context context, String endpoint, String... fields)
             throws Exception {
-        java.net.UnknownHostException dns = null;
-        for (int attempt = 0; attempt < 3; attempt++) {
+        // Retry only DNS failures (which occur before reaching the token server).
+        // Never retry HTTP errors such as invalid_grant; codes are single-use.
+        java.net.UnknownHostException lastDns = null;
+        int attempts = 5;
+        for (int i = 0; i < attempts; i++) {
             try {
-                return formPostOnce(context, endpoint, attempt == 1, fields);
+                // Prefer the active Android Network after browser handoff.
+                return formPostOnce(context, endpoint, i != attempts - 1, fields);
             } catch (java.net.UnknownHostException ex) {
-                dns = ex;
-                if (attempt != 2) Thread.sleep(attempt == 0 ? 350L : 950L);
+                lastDns = ex;
+                if (i < attempts - 1) Thread.sleep(900L + 1100L * i);
             }
         }
-        throw dns == null ? new IllegalStateException("Code exchange failed") : dns;
+        throw lastDns == null ? new IllegalStateException("Token exchange unavailable") : lastDns;
     }
 
     private static JSONObject formPostOnce(Context context, String endpoint,
