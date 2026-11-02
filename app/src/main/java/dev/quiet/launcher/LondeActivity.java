@@ -13,6 +13,11 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.speech.RecognitionListener;
+import android.speech.tts.UtteranceProgressListener;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.speech.tts.TextToSpeech;
 import android.view.Gravity;
 import android.view.View;
@@ -38,11 +43,14 @@ import java.util.concurrent.Executors;
  * Never listens in the background or executes model-generated device actions.
  */
 public final class LondeActivity extends Activity {
-    private static final int REQUEST_SPEECH = 510;
+    private static final int REQUEST_MIC = 511;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService work = Executors.newSingleThreadExecutor();
     private final List<LondeClient.Turn> memory = new ArrayList<>();
     private TextToSpeech speech;
+    private SpeechRecognizer recognizer;
+    private boolean activeSession, recognizerRunning, inForeground=true;
+    private int silenceCount;
     private boolean speechReady, readAloud = true, busy;
     private int requestGeneration = 0;
     private String model = "";
@@ -81,7 +89,15 @@ public final class LondeActivity extends Activity {
         createConsole();
         speech = new TextToSpeech(this, state -> {
             speechReady = state == TextToSpeech.SUCCESS;
-            if (speechReady) speech.setLanguage(Locale.getDefault());
+            if (speechReady) {
+                speech.setLanguage(Locale.getDefault());
+                speech.setSpeechRate(1.02f);
+                speech.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                    @Override public void onStart(String id){}
+                    @Override public void onDone(String id){ui.post(()->voiceFinished());}
+                    @Override public void onError(String id){ui.post(()->voiceFinished());}
+                });
+            }
         });
         if (getIntent() != null && getIntent().getBooleanExtra("auto_listen", false))
             ui.postDelayed(this::listen, 450);
@@ -229,7 +245,7 @@ public final class LondeActivity extends Activity {
         phase=next;
         status.setText(label);
         caption.setText("VOICE ASSISTANT  ·  "+next.name());
-        microphone.setText(next==Phase.THINKING ? "··· WAIT" : "◉  TALK");
+        microphone.setText(activeSession ? "■  STOP" : "◉  TALK");
         orb.invalidate();
     }
     private void say(String value) {
@@ -247,7 +263,7 @@ public final class LondeActivity extends Activity {
         showAnswer(response);
         setPhase(Phase.SPEAKING,"DONE");
         say(response);
-        ui.postDelayed(()->{if(phase==Phase.SPEAKING)setPhase(Phase.READY,"TAP TO SPEAK");},1000);
+        if(!readAloud||!speechReady)voiceFinished();
     }
     private void submitKeyboard() {
         String input=keyboard.getText().toString().trim();
@@ -269,30 +285,76 @@ public final class LondeActivity extends Activity {
         speaker.setText(readAloud?"◖))  ON":"◖))  OFF");
         if(!readAloud && speech!=null)speech.stop();
     }
-    private void listen() {
-        if (busy) {toast("Londe is still working on your last request");return;}
-        if (speech!=null)speech.stop();
-        Intent intent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
-        intent.putExtra(RecognizerIntent.EXTRA_PROMPT,"Speak to Londe");
-        setPhase(Phase.LISTENING,"LISTENING…");
-        try {startActivityForResult(intent,REQUEST_SPEECH);}
-        catch(Exception ex){setPhase(Phase.READY,"MIC UNAVAILABLE");
-            toast("Android speech recognition isn't available. Tap TYPE instead.");}
+    private void voiceFinished(){
+        if(!inForeground||isFinishing())return;
+        if(activeSession&&!busy){
+            setPhase(Phase.READY,"YOUR TURN");
+            ui.postDelayed(()->{if(activeSession&&!busy&&inForeground)startRecognition();},550);
+        } else if(!busy) setPhase(Phase.READY,"TAP TO SPEAK");
     }
-    @Override protected void onActivityResult(int request,int result,Intent data) {
-        super.onActivityResult(request,result,data);
-        if(request!=REQUEST_SPEECH)return;
-        if(result!=RESULT_OK || data==null){
-            setPhase(Phase.READY,"TAP TO SPEAK");return;
+    private void listen(){
+        if(activeSession){
+            activeSession=false;
+            if(recognizer!=null){recognizer.cancel();recognizerRunning=false;}
+            if(speech!=null)speech.stop();
+            setPhase(Phase.READY,"SESSION STOPPED");return;
         }
-        ArrayList<String> heard=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-        if(heard==null || heard.isEmpty()){
-            setPhase(Phase.READY,"DIDN'T CATCH THAT");return;
+        if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQUEST_MIC);return;
         }
-        accept(heard.get(0));
+        if(!SpeechRecognizer.isRecognitionAvailable(this)){
+            toast("Speech recognition unavailable. Try TYPE.");return;
+        }
+        activeSession=true;silenceCount=0;startRecognition();
+    }
+    private void startRecognition(){
+        if(!activeSession||busy||!inForeground||recognizerRunning)return;
+        if(recognizer==null){
+            recognizer=SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+                ? SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+                : SpeechRecognizer.createSpeechRecognizer(this);
+            recognizer.setRecognitionListener(new RecognitionListener(){
+                @Override public void onReadyForSpeech(Bundle b){setPhase(Phase.LISTENING,"LISTENING…");}
+                @Override public void onBeginningOfSpeech(){silenceCount=0;}
+                @Override public void onRmsChanged(float v){}
+                @Override public void onBufferReceived(byte[] b){}
+                @Override public void onEndOfSpeech(){setPhase(Phase.THINKING,"PROCESSING…");}
+                @Override public void onError(int code){
+                    recognizerRunning=false;
+                    if(!activeSession||!inForeground)return;
+                    if(code==SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS||++silenceCount>=5){
+                        activeSession=false;setPhase(Phase.READY,"SESSION PAUSED");return;
+                    }
+                    ui.postDelayed(()->startRecognition(),900);
+                }
+                @Override public void onResults(Bundle b){
+                    recognizerRunning=false;
+                    ArrayList<String> words=b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    if(words!=null&&!words.isEmpty()){silenceCount=0;accept(words.get(0));}
+                    else if(activeSession)ui.postDelayed(()->startRecognition(),550);
+                }
+                @Override public void onPartialResults(Bundle b){}
+                @Override public void onEvent(int type,Bundle extras){}
+            });
+        }
+        Intent i=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
+        try{recognizerRunning=true;recognizer.startListening(i);}
+        catch(Exception e){recognizerRunning=false;activeSession=false;setPhase(Phase.READY,"MIC UNAVAILABLE");}
+    }
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){
+        super.onRequestPermissionsResult(request,permissions,results);
+        if(request==REQUEST_MIC&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)listen();
+    }
+    @Override protected void onPause(){
+        inForeground=false;
+        if(recognizer!=null){recognizer.cancel();recognizerRunning=false;}
+        super.onPause();
+    }
+    @Override protected void onResume(){
+        super.onResume();inForeground=true;
+        if(activeSession&&!busy)ui.postDelayed(()->startRecognition(),550);
     }
 
     private void accept(String question) {
@@ -345,8 +407,7 @@ public final class LondeActivity extends Activity {
                     busy=false;
                     setPhase(Phase.SPEAKING,"REPLY READY");
                     say(result.text);
-                    ui.postDelayed(()->{if(!busy && phase==Phase.SPEAKING)
-                        setPhase(Phase.READY,"TAP TO SPEAK");},1400);
+                    if(!readAloud||!speechReady)voiceFinished();
                 });
             }catch(Exception ex){
                 ui.post(()->{
@@ -385,6 +446,8 @@ public final class LondeActivity extends Activity {
         requestGeneration++;
         work.shutdownNow();
         ui.removeCallbacksAndMessages(null);
+        activeSession=false;
+        if(recognizer!=null)recognizer.destroy();
         if(speech!=null){speech.stop();speech.shutdown();}
         super.onDestroy();
     }
