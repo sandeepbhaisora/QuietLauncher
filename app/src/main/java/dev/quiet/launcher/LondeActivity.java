@@ -92,16 +92,6 @@ public final class LondeActivity extends Activity {
         createConsole();
         selectedEngine=getPreferences(MODE_PRIVATE).getString("tts_engine","");
         initSpeech();
-            speechReady = state == TextToSpeech.SUCCESS;
-            if (speechReady) {
-                speech.setLanguage(Locale.getDefault());
-                speech.setSpeechRate(1.02f);
-                speech.setOnUtteranceProgressListener(new UtteranceProgressListener() {
-                    @Override public void onStart(String id){}
-                    @Override public void onDone(String id){ui.post(()->voiceFinished());}
-                    @Override public void onError(String id){ui.post(()->voiceFinished());}
-                });
-            }
         if (getIntent() != null && getIntent().getBooleanExtra("auto_listen", false))
             ui.postDelayed(this::listen, 450);
     }
