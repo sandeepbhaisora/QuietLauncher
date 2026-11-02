@@ -698,7 +698,14 @@ public final class MainActivity extends Activity {
         page="home";
         render();
         handler.postDelayed(()-> {
-            if(!isFinishing()&&!isDestroyed())requestChatGptPlan(query);
+            if(isFinishing()||isDestroyed())return;
+            List<String> names=new ArrayList<>();
+            for(App app:apps)if(!getSet("hidden").contains(app.packageName))
+                names.add(app.name);
+            IntentRouter.Plan local=IntentRouter.parse(query,names);
+            if(local.valid())previewPlan(local);
+            else new AlertDialog.Builder(this).setTitle("Can't run that yet")
+                .setMessage(local.error).setPositiveButton("OK",null).show();
         },250);
     }
 

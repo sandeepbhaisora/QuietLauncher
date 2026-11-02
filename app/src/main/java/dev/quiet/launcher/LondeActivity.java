@@ -19,6 +19,8 @@ import android.speech.tts.UtteranceProgressListener;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.Voice;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
@@ -50,6 +52,7 @@ public final class LondeActivity extends Activity {
     private TextToSpeech speech;
     private SpeechRecognizer recognizer;
     private boolean activeSession, recognizerRunning, inForeground=true;
+    private String selectedEngine="";
     private int silenceCount;
     private boolean speechReady, readAloud = true, busy;
     private int requestGeneration = 0;
@@ -87,7 +90,8 @@ public final class LondeActivity extends Activity {
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
                 | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
         createConsole();
-        speech = new TextToSpeech(this, state -> {
+        selectedEngine=getPreferences(MODE_PRIVATE).getString("tts_engine","");
+        initSpeech();
             speechReady = state == TextToSpeech.SUCCESS;
             if (speechReady) {
                 speech.setLanguage(Locale.getDefault());
@@ -98,9 +102,87 @@ public final class LondeActivity extends Activity {
                     @Override public void onError(String id){ui.post(()->voiceFinished());}
                 });
             }
-        });
         if (getIntent() != null && getIntent().getBooleanExtra("auto_listen", false))
             ui.postDelayed(this::listen, 450);
+    }
+
+    private void initSpeech(){
+        if(speech!=null){speech.stop();speech.shutdown();}
+        speechReady=false;
+        TextToSpeech.OnInitListener listener=state->{
+            speechReady=state==TextToSpeech.SUCCESS;
+            if(speechReady){
+                speech.setLanguage(Locale.getDefault());
+                speech.setSpeechRate(0.95f);
+                speech.setOnUtteranceProgressListener(new UtteranceProgressListener(){
+                    @Override public void onStart(String id){}
+                    @Override public void onDone(String id){ui.post(()->voiceFinished());}
+                    @Override public void onError(String id){ui.post(()->voiceFinished());}
+                });
+                String preferred=getPreferences(MODE_PRIVATE).getString("tts_voice","");
+                if(!preferred.isEmpty() && speech.getVoices()!=null)
+                    for(Voice v:speech.getVoices())if(preferred.equals(v.getName())){
+                        speech.setVoice(v);break;
+                    }
+            }
+        };
+        speech=selectedEngine.isEmpty()?new TextToSpeech(this,listener):
+            new TextToSpeech(this,listener,selectedEngine);
+    }
+
+    private void voiceSettings(){
+        if(speech==null||!speechReady){toast("Voice engine is initializing");return;}
+        java.util.List<String> labels=new java.util.ArrayList<>();
+        java.util.List<String> ids=new java.util.ArrayList<>();
+        labels.add("Choose installed voice");ids.add("voices");
+        labels.add("Change speech engine");ids.add("engine");
+        labels.add("Install or configure system voices");ids.add("settings");
+        new AlertDialog.Builder(this).setTitle("Londe voice")
+            .setItems(labels.toArray(new String[0]),(d,w)->{
+                if(w==0)pickVoice();
+                else if(w==1)pickEngine();
+                else {
+                    try{startActivity(new Intent("com.android.settings.TTS_SETTINGS"));}
+                    catch(Exception e){toast("Open Settings > Text-to-speech output");}
+                }
+            }).setNegativeButton("Cancel",null).show();
+    }
+    private void pickEngine(){
+        java.util.List<TextToSpeech.EngineInfo> engines=speech.getEngines();
+        if(engines==null||engines.isEmpty()){toast("No TTS engines found");return;}
+        String[] labels=new String[engines.size()];
+        for(int i=0;i<labels.length;i++)labels[i]=engines.get(i).label;
+        new AlertDialog.Builder(this).setTitle("Speech engine")
+            .setItems(labels,(d,index)->{
+                selectedEngine=engines.get(index).name;
+                getPreferences(MODE_PRIVATE).edit().putString("tts_engine",selectedEngine)
+                    .remove("tts_voice").apply();
+                if(activeSession)listen();
+                initSpeech();
+                toast("Engine changed. Try another reply.");
+            }).setNegativeButton("Cancel",null).show();
+    }
+    private void pickVoice(){
+        java.util.List<Voice> voices=new java.util.ArrayList<>();
+        if(speech.getVoices()!=null)
+            for(Voice v:speech.getVoices())
+                if(v.getLocale().getLanguage().equals(Locale.getDefault().getLanguage()))
+                    voices.add(v);
+        if(voices.isEmpty()){toast("No voices for your device language");return;}
+        voices.sort((a,b)->Integer.compare(b.getQuality(),a.getQuality()));
+        String[] labels=new String[voices.size()];
+        for(int i=0;i<labels.length;i++){
+            Voice v=voices.get(i);
+            labels[i]=v.getName()+(v.isNetworkConnectionRequired()?" · network":" · offline");
+        }
+        new AlertDialog.Builder(this).setTitle("Installed voices")
+            .setItems(labels,(d,index)->{
+                Voice v=voices.get(index);
+                speech.setVoice(v);
+                getPreferences(MODE_PRIVATE).edit().putString("tts_voice",v.getName()).apply();
+                if(activeSession)listen();
+                say("Hi, I'm Londe. How does this voice sound?");
+            }).setNegativeButton("Cancel",null).show();
     }
 
     private int dp(float v) {
@@ -217,6 +299,7 @@ public final class LondeActivity extends Activity {
         LinearLayout.LayoutParams mid = new LinearLayout.LayoutParams(0,-1,1);
         mid.leftMargin=dp(7);actionRow.addView(keyboardToggle,mid);
         speaker = button("◖))  ON",this::toggleSound);
+        speaker.setOnLongClickListener(v->{voiceSettings();return true;});
         LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0,-1,1);
         right.leftMargin=dp(7);actionRow.addView(speaker,right);
         root.addView(actionRow,actionParams);
@@ -234,7 +317,7 @@ public final class LondeActivity extends Activity {
         LinearLayout.LayoutParams tr=new LinearLayout.LayoutParams(0,-1,1);
         tr.leftMargin=dp(7);shortcuts.addView(train,tr);
         root.addView(shortcuts,sh);
-        TextView footer=text("MIC ACTIVE ONLY WHEN REQUESTED  ·  ACTIONS NEED APPROVAL",
+        TextView footer=text("LONG-PRESS SOUND FOR VOICES  ·  ACTIONS NEED APPROVAL",
                 10,secondary,false);
         footer.setGravity(Gravity.CENTER);
         footer.setPadding(0,dp(12),0,0);
@@ -375,11 +458,12 @@ public final class LondeActivity extends Activity {
                 Locale.getDefault()).format(new Date())+".");
             return;
         }
-        if(looksLikeAction(normalized)) {
+        String action=LondeCommands.normalize(q);
+        if(action!=null) {
             setPhase(Phase.ACTION,"ACTION TO REVIEW");
             showAnswer("I can help with that. Quiet will show you the action before anything runs.");
             say("I can do that. Please review the action.");
-            ui.postDelayed(()->handoff(q),550);
+            ui.postDelayed(()->handoff(action),550);
             return;
         }
         if(!ChatGptAuth.canUsePlan(this)){
