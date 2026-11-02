@@ -11,6 +11,23 @@
         android:allowBackup="false" android:supportsRtl="true"
         android:theme="@style/AppTheme">
         <activity android:name=".TrainingActivity" android:exported="false"/>
+        <activity android:name=".WorkspaceActivity"
+            android:label="Open in Quiet"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+                <data android:mimeType="text/*"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+        </activity>
         <activity android:name=".MainActivity" android:exported="true"
             android:launchMode="singleTask" android:stateNotNeeded="true"
             android:windowSoftInputMode="adjustResize">

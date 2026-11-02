@@ -352,6 +352,8 @@ public final class MainActivity extends Activity {
         return nav;
     }
 
+    private void openWorkspace() { startSafe(new Intent(this, WorkspaceActivity.class)); }
+
     private void renderHome() {
         String hour = new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date());
         String day = new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(new Date());
@@ -398,6 +400,13 @@ public final class MainActivity extends Activity {
         }
         TextView all = pill("↑   Swipe up for all apps", () -> show("apps"));
         add(main, all, 17);
+
+        section(main, "QUIET WORKSPACE", "OPEN  ↗", this::openWorkspace);
+        LinearLayout work = card();
+        add(work, text("Open anything.", 21, ink, true), 0);
+        add(work, text("Share text or links · read · edit · ask ChatGPT", 12, muted, false), 7);
+        work.setOnClickListener(v -> openWorkspace());
+        add(main, work, 11);
 
         section(main, "FOCUS SESSION", "ADJUST  ↗", this::focusDialog);
         LinearLayout focusCard = card();
@@ -530,6 +539,13 @@ public final class MainActivity extends Activity {
         add(calendar, text("Tap to open your calendar", 12, muted, false), 7);
         calendar.setOnClickListener(v -> openCalendar()); add(main, calendar, 9);
 
+        section(main, "QUIET WORKSPACE", "OPEN  ↗", this::openWorkspace);
+        LinearLayout workspace = card();
+        add(workspace, text("Open in Quiet.", 21, ink, true), 0);
+        add(workspace, text("Text · links · local editing · ChatGPT handoff", 12, muted, false), 7);
+        workspace.setOnClickListener(v -> openWorkspace());
+        add(main, workspace, 9);
+
         section(main, "QUIET TRAINING", "OPEN  ↗", this::openTraining);
         LinearLayout training = card();
         add(training, text("Train with intention.", 21, ink, true), 0);
@@ -632,6 +648,8 @@ public final class MainActivity extends Activity {
     private void renderSettings() {
         add(main, text("Make it yours.", 34, ink, true), 17);
         add(main, text("No account. No ads. Your phone, your rules.", 14, muted, false), 5);
+        section(main, "WORKSPACE", null, null);
+        setting("Open in Quiet", "Read, edit and work with shared text and links", this::openWorkspace);
         section(main, "PHONE", null, null);
         setting("Set Quiet as home", "Choose your default Android launcher", () -> startSafe(new Intent(Settings.ACTION_HOME_SETTINGS)));
         setting("Appearance", "Ink · Paper · True black", this::chooseTheme);
@@ -644,7 +662,7 @@ public final class MainActivity extends Activity {
         setting("Manage Android widgets", "Choose useful home widgets", () -> show("widgets"));
         section(main, "ABOUT", null, null);
         LinearLayout about = card();
-        add(about, text("Quiet 0.1.1 — direct-install edition", 14, ink, true), 0);
+        add(about, text("Quiet 0.3.0 — offline workspace preview", 14, ink, true), 0);
         add(about, text("Offline by default. No subscription, account, analytics or ad SDK. Notifications are handled by Android. App hiding and protection only apply inside Quiet.", 12, muted, false), 8);
         add(main, about, 10); space(main, 25);
     }
