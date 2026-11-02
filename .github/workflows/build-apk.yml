@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 permissions:
   contents: read
 jobs:
@@ -38,6 +40,11 @@ jobs:
             app/src/main/java/dev/quiet/launcher/ActionPolicy.java \
             app/src/test/java/dev/quiet/launcher/ActionPolicyTest.java
           java -cp /tmp/quiet-intent-tests dev.quiet.launcher.ActionPolicyTest
+      - name: Test speech cleanup (JVM)
+        run: |
+          mkdir -p /tmp/quiet-speech-tests
+          javac -d /tmp/quiet-speech-tests app/src/main/java/dev/quiet/launcher/SpeechTextCleaner.java app/src/test/java/dev/quiet/launcher/SpeechTextCleanerTest.java
+          java -cp /tmp/quiet-speech-tests dev.quiet.launcher.SpeechTextCleanerTest
       - name: Assemble installable debug APK
         run: gradle --no-daemon :app:assembleDebug
       - name: Upload APK
