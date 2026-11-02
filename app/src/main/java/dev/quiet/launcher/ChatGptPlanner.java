@@ -17,7 +17,7 @@ import java.util.List;
 /** Uses an explicitly authorized ChatGPT subscription inference token. */
 final class ChatGptPlanner {
     private ChatGptPlanner() {}
-    private static String availableModel(String token) throws Exception {
+    static String availableModel(String token) throws Exception {
         HttpURLConnection c=(HttpURLConnection)new URL("https://api.openai.com/v1/models").openConnection();
         c.setConnectTimeout(10000); c.setReadTimeout(20000);
         c.setRequestProperty("Authorization","Bearer "+token);
