@@ -370,7 +370,7 @@ public final class MainActivity extends Activity {
         add(view, r, 23);
     }
 
-    private void show(String next) { if (next.equals(page) && shell != null) return; if(!"home".equals(next))stopWake(); page = next; render(); // Wake requires a separate local keyword detector; never auto-launch speech recognition. }
+    private void show(String next) { if (next.equals(page) && shell != null) return; if(!"home".equals(next))stopWake(); page = next; render(); }
     private void render() {
         if (prefs == null) return;
         setPalette(); focusLive = null; clockLive = null;
