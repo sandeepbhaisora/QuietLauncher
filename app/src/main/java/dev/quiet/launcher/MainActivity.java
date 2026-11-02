@@ -666,6 +666,14 @@ public final class MainActivity extends Activity {
             Toast.makeText(this,"Enter a command up to 220 characters",Toast.LENGTH_LONG).show();
             return;
         }
+        if (query.toLowerCase(Locale.ROOT).matches(".*\\b(what(?:'s| is)?|tell|show|current)\\b.*\\b(time|clock)\\b.*|.*\\btime right now\\b.*")) {
+            String time = new SimpleDateFormat("h:mm a", Locale.getDefault())
+                    .format(new Date());
+            new AlertDialog.Builder(this).setTitle("Current time")
+                .setMessage("It's " + time + " on your phone.")
+                .setPositiveButton("OK", null).show();
+            return;
+        }
         // Calendar questions need actual calendar data, not a model-generated action.
         if (query.toLowerCase(Locale.ROOT).matches(".*\\b(meetings?|appointments?|calendar|schedule)\\b.*")
                 && query.toLowerCase(Locale.ROOT).matches(".*\\b(what|when|do i|have|show|today|tomorrow)\\b.*")) {
