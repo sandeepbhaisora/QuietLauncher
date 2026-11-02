@@ -431,6 +431,9 @@ public final class MainActivity extends Activity {
         add(commandCard, commandButtons, 11);
         TextView askAi = pill("ASK AI  ✧  OPTIONAL", () -> requestAiPlan(command.getText().toString()));
         add(commandCard, askAi, 9);
+        TextView chat = pill("USE CHATGPT ACCOUNT  ✦",
+                () -> requestChatGptPlan(command.getText().toString()));
+        add(commandCard, chat, 9);
         add(main, commandCard, 13);
         add(main, text("Local action router. Tap Speak for Android's speech service (it may use the network). No always-on listening.",
                 11, muted, false), 8);
@@ -558,6 +561,68 @@ public final class MainActivity extends Activity {
                     .edit().putInt("minutes", minutes).apply();
         }
         openTraining();
+    }
+
+    private void chatGptAccountDialog() {
+        boolean connected=ChatGptAuth.isConnected(this);
+        new AlertDialog.Builder(this)
+            .setTitle(connected ? "ChatGPT account" : "Connect with ChatGPT")
+            .setMessage(connected ? ChatGptAuth.account(this) +
+                "\n\nAccount usage permission: " +
+                (ChatGptAuth.canUsePlan(this) ? "Granted" : "Not granted") :
+                "Sign in through OpenAI in your browser. Quiet will not see your password. " +
+                "An eligible ChatGPT plan and account approval are required.")
+            .setNegativeButton("Cancel",null)
+            .setNeutralButton(connected ? "Disconnect" : "Learn later",(d,w)-> {
+                if (connected) {ChatGptAuth.disconnect(this); render();}
+            })
+            .setPositiveButton(connected ? "Sign in again" : "Sign in", (d,w)-> {
+                Toast.makeText(this,"Opening ChatGPT sign-in...",Toast.LENGTH_SHORT).show();
+                ChatGptAuth.signIn(this,background,handler,(ok,message)-> {
+                    new AlertDialog.Builder(this).setTitle(ok?"ChatGPT":"Sign-in unsuccessful")
+                            .setMessage(message).setPositiveButton("OK",null).show();
+                    if(ok)render();
+                });
+            }).show();
+    }
+
+    private void requestChatGptPlan(String input) {
+        String query=input==null?"":input.trim();
+        if(query.isEmpty()||query.length()>220){
+            Toast.makeText(this,"Enter a command up to 220 characters",Toast.LENGTH_LONG).show();
+            return;
+        }
+        if(!ChatGptAuth.canUsePlan(this)){chatGptAccountDialog();return;}
+        new AlertDialog.Builder(this).setTitle("Ask ChatGPT to plan?")
+            .setMessage("Send only this text to OpenAI?\n\n"+query+
+                "\n\nYou will review any proposed actions before they run.")
+            .setNegativeButton("Cancel",null)
+            .setPositiveButton("Continue",(d,w)-> {
+                Toast.makeText(this,"Asking ChatGPT...",Toast.LENGTH_SHORT).show();
+                background.execute(()-> {
+                    try {
+                        List<IntentRouter.Step> proposed=ChatGptPlanner.plan(this,query);
+                        handler.post(()->{
+                            if(isDestroyed()||isFinishing())return;
+                            List<String> installed=new ArrayList<>();
+                            for(App a:apps)if(!getSet("hidden").contains(a.packageName))
+                                installed.add(a.name);
+                            IntentRouter.Plan safe=ActionPolicy.validate(query,proposed,installed);
+                            if(safe.valid())previewPlan(safe);
+                            else new AlertDialog.Builder(this).setTitle("Plan rejected")
+                                    .setMessage(safe.error).setPositiveButton("OK",null).show();
+                        });
+                    } catch(Exception e) {
+                        handler.post(()-> {
+                            if(isDestroyed()||isFinishing())return;
+                            new AlertDialog.Builder(this).setTitle("ChatGPT request failed")
+                                .setMessage("No actions were run. Your account may not have access to "+
+                                    "this model or usage may be exhausted. Try a local command.")
+                                .setPositiveButton("OK",null).show();
+                        });
+                    }
+                });
+            }).show();
     }
 
     // Only the explicitly entered text is sent to a configured HTTPS gateway.
@@ -1215,6 +1280,10 @@ public final class MainActivity extends Activity {
         section(main, "HOME", null, null);
         setting("Classic home", "Original dashboard and essential app tiles", () -> show("classic"));
         setting("Intent-first home", "Default home · local commands and recommendations", () -> show("home"));
+        section(main, "CHATGPT", null, null);
+        setting(ChatGptAuth.isConnected(this) ? "ChatGPT account · Connected" : "Connect ChatGPT",
+                ChatGptAuth.account(this) + " · Official open-source sign-in",
+                this::chatGptAccountDialog);
         section(main, "AI PLANNER", null, null);
         setting("Configure AI gateway", "Optional HTTPS server · explicit sharing only", this::configureGateway);
         section(main, "WORKSPACE", null, null);
