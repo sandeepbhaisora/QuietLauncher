@@ -906,6 +906,7 @@ public final class MainActivity extends Activity {
                     recentReply="You: "+q+"\\n\\nLonde: "+result.text;
                     if(londeReply!=null)londeReply.setText(recentReply);
                     wakeStatus("LONDE REPLIED");
+                    if ("response".equals(aiScene) && "home".equals(page)) render();
                     if(voiceReady && londeSpeech!=null){
                         londeSpeaking=true;
                         int started=londeSpeech.speak(
@@ -2054,11 +2055,22 @@ public final class MainActivity extends Activity {
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request == REQUEST_VOICE_COMMAND) {
+            if ("listening".equals(aiScene) && result != RESULT_OK) {
+                aiScene("hub");
+                return;
+            }
             if (result == RESULT_OK && data != null) {
                 ArrayList<String> matches = data.getStringArrayListExtra(
                         RecognizerIntent.EXTRA_RESULTS);
                 if (matches != null && !matches.isEmpty()) {
                     String recognized = matches.get(0);
+                    if ("listening".equals(aiScene)) {
+                        aiScene = "response";
+                        recentReply = "You: " + recognized + "\\n\\nReview your command before execution.";
+                        render();
+                        homeAsk(recognized);
+                        return;
+                    }
                     new AlertDialog.Builder(this).setTitle("You said")
                             .setMessage(recognized)
                             .setNegativeButton("Cancel", null)
