@@ -1,6 +1,8 @@
 package dev.quiet.launcher;
 
 import android.content.Context;
+import android.util.JsonReader;
+import java.io.InputStreamReader;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
@@ -16,31 +18,35 @@ import java.util.List;
 final class ChatGptPlanner {
     private ChatGptPlanner() {}
     private static String availableModel(String token) throws Exception {
-        HttpURLConnection c = (HttpURLConnection)new URL("https://api.openai.com/v1/models")
-                .openConnection();
-        c.setInstanceFollowRedirects(false);
-        c.setConnectTimeout(10000);c.setReadTimeout(15000);
+        HttpURLConnection c=(HttpURLConnection)new URL("https://api.openai.com/v1/models").openConnection();
+        c.setConnectTimeout(10000); c.setReadTimeout(20000);
         c.setRequestProperty("Authorization","Bearer "+token);
         try {
-            if(c.getResponseCode()!=200)throw new IllegalStateException("Model catalog unavailable");
-            JSONObject listing;
-            try(InputStream input=c.getInputStream();
-                ByteArrayOutputStream out=new ByteArrayOutputStream()) {
-                byte[] buf=new byte[4096];int n;
-                while((n=input.read(buf))!=-1){
-                    if(out.size()+n>262144)throw new IllegalStateException("Catalog too large");
-                    out.write(buf,0,n);
+            if(c.getResponseCode()!=200)throw new IllegalStateException("Model catalog HTTP "+c.getResponseCode());
+            try(InputStream in=c.getInputStream();
+                JsonReader r=new JsonReader(new InputStreamReader(in,StandardCharsets.UTF_8))) {
+                r.beginObject();
+                while(r.hasNext()){
+                    if(!"models".equals(r.nextName())){r.skipValue();continue;}
+                    r.beginArray();
+                    while(r.hasNext()){
+                        String slug="",visibility="";
+                        r.beginObject();
+                        while(r.hasNext()){
+                            String field=r.nextName();
+                            if("slug".equals(field)) slug=r.nextString();
+                            else if("visibility".equals(field)) visibility=r.nextString();
+                            else r.skipValue();
+                        }
+                        r.endObject();
+                        if("list".equals(visibility)&&!slug.isEmpty())return slug;
+                    }
+                    r.endArray();
                 }
-                listing=new JSONObject(out.toString("UTF-8"));
+                r.endObject();
             }
-            JSONArray models=listing.getJSONArray("models");
-            for(int i=0;i<models.length();i++){
-                JSONObject m=models.getJSONObject(i);
-                if("list".equals(m.optString("visibility"))&&!m.optString("slug").isEmpty())
-                    return m.getString("slug");
-            }
-            throw new IllegalStateException("No available ChatGPT models");
-        }finally{c.disconnect();}
+            throw new IllegalStateException("No available model in catalog");
+        } finally {c.disconnect();}
     }
 
     static List<IntentRouter.Step> plan(Context context, String command) throws Exception {
