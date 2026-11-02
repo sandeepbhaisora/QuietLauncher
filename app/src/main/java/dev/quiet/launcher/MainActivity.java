@@ -2,6 +2,7 @@ package dev.quiet.launcher;
 
 import android.app.Activity;
 import android.app.SearchManager;
+import android.speech.RecognizerIntent;
 import android.app.AlertDialog;
 import android.app.AppOpsManager;
 import android.app.KeyguardManager;
@@ -80,6 +81,7 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_PICK_WIDGET = 200;
     private static final int REQUEST_CONFIGURE_WIDGET = 201;
     private static final int REQUEST_AUTH = 202;
+    private static final int REQUEST_VOICE_COMMAND = 204;
     private static final String PREFS = "quiet_local_v1";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -417,11 +419,17 @@ public final class MainActivity extends Activity {
             if (action == EditorInfo.IME_ACTION_GO) { execute.run(); return true; }
             return false;
         });
-        TextView run = pill("DO IT  →", execute);
+        LinearLayout commandButtons = row();
+        TextView run = pill("PREVIEW / RUN  →", execute);
+        commandButtons.addView(run, new LinearLayout.LayoutParams(0, dp(49), 1));
+        TextView speak = pill("🎙  SPEAK", this::startVoiceInput);
+        LinearLayout.LayoutParams micParams = new LinearLayout.LayoutParams(-2, dp(49));
+        micParams.leftMargin = dp(8);
+        commandButtons.addView(speak, micParams);
         run.setContentDescription("Run local command");
-        add(commandCard, run, 11);
+        add(commandCard, commandButtons, 11);
         add(main, commandCard, 13);
-        add(main, text("On-device shortcuts, not an AI chatbot. No voice listening or automatic uploads.",
+        add(main, text("Local action router. Tap Speak for Android's speech service (it may use the network). No always-on listening.",
                 11, muted, false), 8);
 
         section(main, "SUGGESTED FOR YOU", "VIEW ALL  ↗", () -> show("root"));
@@ -550,75 +558,81 @@ public final class MainActivity extends Activity {
     }
 
     private void runSmartCommand(String input) {
-        String q = input.toLowerCase(Locale.ROOT).trim()
-                .replaceAll("\\s+", " ");
-        if (q.isEmpty()) return;
+        List<String> installed = new ArrayList<>();
+        for (App app : apps) installed.add(app.name);
+        IntentRouter.Plan plan = IntentRouter.parse(input, installed);
+        if (!plan.valid()) {
+            new AlertDialog.Builder(this).setTitle("Quiet couldn't understand")
+                    .setMessage(plan.error)
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
+        if (plan.needsPreview()) {
+            StringBuilder preview = new StringBuilder();
+            for (int i = 0; i < plan.steps.size(); i++)
+                preview.append(i + 1).append(". ").append(plan.steps.get(i).description()).append("\\n");
+            new AlertDialog.Builder(this).setTitle("Review these actions")
+                    .setMessage(preview.toString().trim())
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Run actions", (dialog, which) -> executePlan(plan)).show();
+        } else {
+            executePlan(plan);
+        }
+    }
 
-        // Explicit app-opening commands are routed through the existing app
-        // permissions, protected-app prompts and distraction interstitials.
-        Matcher launch = Pattern.compile("^(?:open|launch|start) (?:the )?(?:app )?(.+)$").matcher(q);
-        if (launch.matches()) {
-            String target = launch.group(1).trim();
-            if (target.equals("settings")) { show("settings"); return; }
-            if (target.equals("apps") || target.equals("app drawer")) { show("apps"); return; }
-            for (App app : apps) if (app.name.toLowerCase(Locale.ROOT).equals(target)) {
-                open(app); return;
-            }
-            for (App app : apps) if (app.name.toLowerCase(Locale.ROOT).contains(target)) {
-                open(app); return;
-            }
-            Toast.makeText(this, "No matching installed app. Try the Apps tab.",
+    private void executePlan(IntentRouter.Plan plan) {
+        // Stateful updates first, then a single navigation. The parser rejects
+        // commands requiring two destinations. Nothing runs without a user tap.
+        IntentRouter.Step destination = null;
+        for (IntentRouter.Step step : plan.steps) {
+            if (step.action == IntentRouter.Action.START_FOCUS) {
+                prefs.edit().putLong("focusUntil",
+                        System.currentTimeMillis() + step.minutes * 60000L).apply();
+                Toast.makeText(this, "Focus started for " + step.minutes + " minutes",
+                        Toast.LENGTH_SHORT).show();
+            } else if (step.action == IntentRouter.Action.STOP_FOCUS) {
+                prefs.edit().remove("focusUntil").apply();
+                Toast.makeText(this, "Focus stopped", Toast.LENGTH_SHORT).show();
+            } else destination = step;
+        }
+        if (destination == null) { render(); return; }
+        switch (destination.action) {
+            case FOCUS_PICKER: focusDialog(); break;
+            case TRAIN:
+                if (!destination.equipment.isEmpty()) {
+                    getSharedPreferences("quiet_training_v1", MODE_PRIVATE).edit()
+                            .putString("equipment", destination.equipment).apply();
+                }
+                if (destination.minutes > 0) startTraining(destination.minutes);
+                else openTraining();
+                break;
+            case WORKSPACE: openWorkspace(); break;
+            case NOTES: editNote(); break;
+            case APP:
+                for (App a : apps) if (a.name.equals(destination.appName)) { open(a); break; }
+                break;
+            case APPS: show("apps"); break;
+            case USAGE: show("usage"); break;
+            case CALENDAR: openCalendar(); break;
+            case SETTINGS: show("settings"); break;
+            default: render(); break;
+        }
+    }
+
+    private void startVoiceInput() {
+        // Uses the system/provider recognition Activity. Android can choose a
+        // cloud-powered recognizer; Quiet does not claim offline privacy.
+        Intent speech = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        speech.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        speech.putExtra(RecognizerIntent.EXTRA_PROMPT, "Tell Quiet what you want to do");
+        speech.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        try {
+            startActivityForResult(speech, REQUEST_VOICE_COMMAND);
+        } catch (Exception ex) {
+            Toast.makeText(this, "No speech recognition app is available. Use the keyboard.",
                     Toast.LENGTH_LONG).show();
-            return;
         }
-
-        if (q.matches(".*\\b(screen time|usage|phone time)\\b.*")) {
-            show("usage"); return;
-        }
-        if (q.matches(".*\\b(calendar|schedule)\\b.*")) {
-            openCalendar(); return;
-        }
-        if (q.matches(".*\\b(quick note|take a note|jot|notepad)\\b.*")) {
-            editNote(); return;
-        }
-        if (q.matches(".*\\b(workout|work out|train|training|exercise|fitness)\\b.*")) {
-            Matcher duration = Pattern.compile("\\b(\\d{1,3})\\s*(?:mins?|minutes?)\\b").matcher(q);
-            if (duration.find()) {
-                int mins = Integer.parseInt(duration.group(1));
-                if (mins != 20 && mins != 30 && mins != 45) {
-                    Toast.makeText(this, "Training currently supports 20, 30, or 45 minutes.",
-                            Toast.LENGTH_LONG).show();
-                    return;
-                }
-                startTraining(mins);
-            } else openTraining();
-            return;
-        }
-        if (q.matches(".*\\b(focus|concentrate|deep work)\\b.*")) {
-            Matcher duration = Pattern.compile("\\b(\\d{1,3})\\s*(?:mins?|minutes?)\\b").matcher(q);
-            if (duration.find()) {
-                int mins = Integer.parseInt(duration.group(1));
-                if (mins > 0 && mins <= 180) {
-                    prefs.edit().putLong("focusUntil",
-                            System.currentTimeMillis() + mins * 60000L).apply();
-                    Toast.makeText(this, "Focus started: " + mins + " minutes",
-                            Toast.LENGTH_SHORT).show();
-                    show("home");
-                    render();
-                    return;
-                }
-            }
-            focusDialog(); return;
-        }
-        if (q.matches(".*\\b(read|write|workspace|article|document|summarize|summary|pdf)\\b.*")) {
-            openWorkspace(); return;
-        }
-        if (q.equals("apps") || q.equals("all apps")) { show("apps"); return; }
-        if (q.equals("settings")) { show("settings"); return; }
-        if (handleCommand(q)) return;
-
-        Toast.makeText(this, "I can open apps, start focus, train, show usage, or open Workspace.",
-                Toast.LENGTH_LONG).show();
     }
 
     /** Original two-eye character drawn with simple native shapes. */
@@ -1441,6 +1455,21 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == REQUEST_VOICE_COMMAND) {
+            if (result == RESULT_OK && data != null) {
+                ArrayList<String> matches = data.getStringArrayListExtra(
+                        RecognizerIntent.EXTRA_RESULTS);
+                if (matches != null && !matches.isEmpty()) {
+                    String recognized = matches.get(0);
+                    new AlertDialog.Builder(this).setTitle("You said")
+                            .setMessage(recognized)
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Interpret", (d, w) -> runSmartCommand(recognized))
+                            .show();
+                }
+            }
+            return;
+        }
         if (request == REQUEST_AUTH) {
             if (result == RESULT_OK && pendingProtectedPackage != null) {
                 String p = pendingProtectedPackage; pendingProtectedPackage = null;
