@@ -67,8 +67,8 @@ final class ChatGptAuth {
             JSONObject j = readSession(context);
             if (j == null) return "Not connected";
             String email = j.optString("email", "");
-            return email.isEmpty() ? "Connected ChatGPT account" : email;
-        } catch (Exception ex) { return "Sign in again"; }
+            return email.isEmpty() ? "ChatGPT connected" : email;
+        } catch (Exception ex) { return "Saved connection could not be opened"; }
     }
     static boolean canUsePlan(Context context) {
         try {
@@ -86,10 +86,13 @@ final class ChatGptAuth {
                 String state = randomToken(32), nonce = randomToken(32), verifier = randomToken(48);
                 String challenge = url64(sha256(verifier.getBytes(StandardCharsets.US_ASCII)));
                 JSONObject old = readSession(activity);
-                String issued = old == null ? "" : old.optString("client_id", "");
+                SharedPreferences prefs = activity.getSharedPreferences(PREF, Context.MODE_PRIVATE);
+                // A completed browser registration may be followed by a failed token exchange.
+                // Save its issued client ID independently so the next attempt reuses it.
+                String issued = old == null ? prefs.getString("pending_client_id", "")
+                        : old.optString("client_id", "");
                 boolean newClient = issued.isEmpty();
                 String clientId = newClient ? "dynamic_agent_client" : issued;
-                SharedPreferences prefs = activity.getSharedPreferences(PREF, Context.MODE_PRIVATE);
                 String host = prefs.getString("host_id", "");
                 if (host.isEmpty()) {
                     host = "urn:uuid:" + UUID.randomUUID();
@@ -108,8 +111,12 @@ final class ChatGptAuth {
                     .append("&code_challenge=").append(enc(challenge))
                     .append("&ext_agent_host_id=").append(enc(host));
                 if (newClient) url.append("&agent_name_hint=").append(enc("Quiet Launcher"));
-                else if (old != null && !old.optString("email", "").isEmpty())
-                    url.append("&login_hint=").append(enc(old.optString("email")));
+                else if (old != null) {
+                    if (!old.optString("id_token", "").isEmpty())
+                        url.append("&id_token_hint=").append(enc(old.optString("id_token")));
+                    if (!old.optString("email", "").isEmpty())
+                        url.append("&login_hint=").append(enc(old.optString("email")));
+                }
 
                 ui.post(() -> {
                     try {
@@ -134,6 +141,9 @@ final class ChatGptAuth {
                     if (callbackClient == null || !callbackClient.matches("oaiapp_[A-Za-z0-9_-]{8,150}"))
                         throw new SecurityException("OpenAI did not return a registered client ID");
                     issued = callbackClient;
+                    // Store only the public registration ID, never the authorization code.
+                    if (!prefs.edit().putString("pending_client_id", issued).commit())
+                        throw new IllegalStateException("Could not save ChatGPT registration");
                 } else if (callbackClient != null && !callbackClient.equals(issued))
                     throw new SecurityException("OAuth client ID changed");
                 JSONObject tokens = formPost(TOKEN_URL,
@@ -157,6 +167,7 @@ final class ChatGptAuth {
                 session.put("expires_at", System.currentTimeMillis()
                     + tokens.optLong("expires_in", 3600) * 1000L);
                 saveSession(activity, session);
+                prefs.edit().remove("pending_client_id").apply();
                 boolean usage = hasScope(granted, "chatgpt.tokens.use.direct");
                 finish(ui, callback, true, usage
                     ? "ChatGPT connected. Model usage is authorized."
@@ -277,7 +288,8 @@ final class ChatGptAuth {
     static void disconnect(Context context) {
         // Local disconnect. Account holders may also revoke access in ChatGPT settings.
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
-                .edit().remove("encrypted").remove("iv").apply();
+                .edit().remove("encrypted").remove("iv")
+                .remove("pending_client_id").apply();
     }
 
     private static boolean hasScope(String grants, String scope) {
