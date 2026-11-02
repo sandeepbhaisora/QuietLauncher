@@ -3,6 +3,8 @@ package dev.quiet.launcher;
 import android.app.Activity;
 import android.app.SearchManager;
 import android.speech.RecognizerIntent;
+import android.Manifest;
+import android.speech.tts.TextToSpeech;
 import android.content.ActivityNotFoundException;
 import android.app.AlertDialog;
 import android.app.AppOpsManager;
@@ -108,6 +110,17 @@ public final class MainActivity extends Activity {
     private boolean initialResumePending = true;
     private boolean setupPromptScheduled;
     private long lastRefreshElapsed;
+    private static final int REQ_WAKE_MIC=886;
+    private HomeWakeListener homeWake;
+    private boolean foregroundHome;
+    private TextView londeStatus, londeReply;
+    private QuietFace assistantFace;
+    private TextToSpeech londeSpeech;
+    private boolean voiceReady, replyBusy;
+    private String recentReply="Say Hey Londe to ask or command.";
+    private String wakeState="VOICE WAKE OFF";
+    private String assistantModel="";
+    private final List<LondeClient.Turn> homeContext=new ArrayList<>();
 
     private static final class App {
         final String name, packageName, group;
@@ -133,6 +146,8 @@ public final class MainActivity extends Activity {
         widgetManager = AppWidgetManager.getInstance(this);
         widgetHost = new AppWidgetHost(this, WIDGET_HOST_ID);
         setPalette();
+        londeSpeech=new TextToSpeech(this,code->{voiceReady=code==TextToSpeech.SUCCESS;
+            if(voiceReady)londeSpeech.setLanguage(Locale.getDefault());});
         render();
         refreshAsync();
         if(getIntent()!=null){
@@ -170,6 +185,15 @@ public final class MainActivity extends Activity {
         intent.removeExtra("londe_settings");
     }
 
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] grants){
+        super.onRequestPermissionsResult(request,permissions,grants);
+        if(request==REQ_WAKE_MIC && grants.length>0 && grants[0]==PackageManager.PERMISSION_GRANTED)
+            {show("home");startWakeIfAllowed();}
+        else if(request==REQ_WAKE_MIC){
+            prefs.edit().putBoolean("londe_wake_enabled",false).apply();stopWake();
+        }
+    }
+
     @Override protected void onSaveInstanceState(Bundle out) {
         out.putString("quiet.page", page);
         super.onSaveInstanceState(out);
@@ -177,6 +201,8 @@ public final class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        stopWake();
+        if(londeSpeech!=null){londeSpeech.stop();londeSpeech.shutdown();}
         background.shutdownNow();
         super.onDestroy();
     }
@@ -195,6 +221,8 @@ public final class MainActivity extends Activity {
         super.onResume();
         // Browser-based ChatGPT OAuth completes only after Quiet becomes active again.
         ChatGptAuth.onLauncherResumed();
+        foregroundHome=true;
+        handler.postDelayed(this::startWakeIfAllowed,400);
         if (initialResumePending) {
             initialResumePending = false;
             return;
@@ -204,6 +232,8 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        foregroundHome=false;
+        stopWake();
         ChatGptAuth.onLauncherPaused();
         super.onPause();
     }
@@ -320,7 +350,7 @@ public final class MainActivity extends Activity {
         add(view, r, 23);
     }
 
-    private void show(String next) { if (next.equals(page) && shell != null) return; page = next; render(); }
+    private void show(String next) { if (next.equals(page) && shell != null) return; if(!"home".equals(next))stopWake(); page = next; render(); if("home".equals(next))startWakeIfAllowed(); }
     private void render() {
         if (prefs == null) return;
         setPalette(); focusLive = null; clockLive = null;
@@ -432,10 +462,32 @@ public final class MainActivity extends Activity {
         add(copy, text("A calmer way to use your phone.", 12, muted, false), 7);
         heroRow.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
         QuietFace face = new QuietFace();
-        face.setContentDescription("Quiet mascot, a smiling friendly face");
+        face.setContentDescription("Londe AI face, voice-activated when enabled");
+        assistantFace=face;
+        face.setOnClickListener(v->new AlertDialog.Builder(this)
+            .setTitle("Londe voice wake")
+            .setMessage("Say Hey Londe while Quiet Home is visible. Enable voice wake in Settings. Always-on screen-off activation is not supported.")
+            .setPositiveButton("Settings",(d,w)->show("settings"))
+            .setNegativeButton("Close",null).show());
         heroRow.addView(face, new LinearLayout.LayoutParams(dp(92), dp(108)));
         hero.addView(heroRow);
-        add(main, hero, 13);
+        add(main, hero, 7);
+        LinearLayout aiPanel=card();
+        londeStatus=text(wakeState,12,accent,true);
+        add(aiPanel,londeStatus,6);
+        londeReply=text(recentReply,15,ink,false);
+        add(aiPanel,londeReply,9);
+        TextView inputHint=pill("ASK LONDE HERE  ↗",()->{
+            EditText question=new EditText(this);
+            question.setSingleLine(false);
+            question.setHint("Ask a question or say a command");
+            new AlertDialog.Builder(this).setTitle("Londe on Home")
+                .setView(question).setNegativeButton("Cancel",null)
+                .setPositiveButton("Ask",(d,w)->homeAsk(question.getText().toString()))
+                .show();
+        });
+        add(aiPanel,inputHint,5);
+        add(main,aiPanel,13);
 
         // Keep the primary input obvious, functional, and independently scrollable.
         LinearLayout commandCard = card();
@@ -680,6 +732,101 @@ public final class MainActivity extends Activity {
                 .setNegativeButton("Not now", null);
         }
         dialog.show();
+    }
+
+    private void configureWake(){
+        boolean enabled=prefs.getBoolean("londe_wake_enabled",false);
+        new AlertDialog.Builder(this).setTitle("Hey Londe")
+            .setMessage("Experimental wake listening works only while Quiet Home is on screen. It uses Android's on-device speech recognition; audio stays with your phone's recognizer. It may use battery and may be unavailable on some phones. No screen-off or background listening.")
+            .setNegativeButton("Cancel",null)
+            .setNeutralButton("Disable",(d,w)->{
+                prefs.edit().putBoolean("londe_wake_enabled",false).apply();
+                stopWake();render();
+            })
+            .setPositiveButton(enabled?"Keep enabled":"Enable",(d,w)->{
+                prefs.edit().putBoolean("londe_wake_enabled",true).apply();
+                if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
+                    requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQ_WAKE_MIC);
+                else{show("home");startWakeIfAllowed();}
+            }).show();
+    }
+    private void wakeStatus(String value){
+        wakeState=value;
+        if(londeStatus!=null)londeStatus.setText(value);
+        if(assistantFace!=null)assistantFace.invalidate();
+    }
+    private void stopWake(){
+        if(homeWake!=null){homeWake.stop();homeWake=null;}
+        wakeStatus("VOICE WAKE OFF");
+    }
+    private void startWakeIfAllowed(){
+        if(!foregroundHome||!"home".equals(page)||replyBusy||
+           !prefs.getBoolean("londe_wake_enabled",false))return;
+        if(homeWake!=null&&homeWake.isRunning())return;
+        homeWake=new HomeWakeListener(this,new HomeWakeListener.Callbacks(){
+            @Override public void onState(String state){wakeStatus(state);}
+            @Override public void onWake(){wakeStatus("LONDE IS LISTENING");}
+            @Override public void onRequest(String req){homeAsk(req);}
+            @Override public void onUnavailable(String error){
+                wakeStatus("WAKE UNAVAILABLE");
+                if(londeReply!=null)londeReply.setText(error);
+            }
+        });
+        homeWake.start();
+    }
+    private void homeAsk(String request){
+        String q=request==null?"":request.trim();
+        if(q.isEmpty())return;
+        if(replyBusy){wakeStatus("BUSY · TRY AGAIN");return;}
+        stopWake();
+        if(q.length()>700){wakeStatus("REQUEST TOO LONG");return;}
+        String action=LondeCommands.normalize(q);
+        if(action!=null){
+            recentReply="You asked: "+q+"\\nReview before running.";
+            if(londeReply!=null)londeReply.setText(recentReply);
+            wakeStatus("ACTION TO REVIEW");
+            handleLondeAction(action);
+            return;
+        }
+        if(!ChatGptAuth.canUsePlan(this)){
+            recentReply="Connect ChatGPT in Settings for Londe's general answers.";
+            if(londeReply!=null)londeReply.setText(recentReply);
+            wakeStatus("CHATGPT NOT CONNECTED");return;
+        }
+        replyBusy=true;wakeStatus("LONDE THINKING…");
+        if(londeReply!=null)londeReply.setText("You: "+q+"\\n\\nThinking…");
+        homeContext.add(new LondeClient.Turn("user",q));
+        if(homeContext.size()>18)homeContext.remove(0);
+        List<LondeClient.Turn> history=new ArrayList<>(homeContext);
+        background.execute(()->{
+            try {
+                LondeClient.Answer result=LondeClient.ask(this,history,assistantModel,
+                    partial->handler.post(()->{
+                        if(!isFinishing()&&londeReply!=null)
+                            londeReply.setText("You: "+q+"\\n\\n"+partial);
+                    }));
+                handler.post(()->{
+                    if(isFinishing()||isDestroyed())return;
+                    assistantModel=result.model;replyBusy=false;
+                    homeContext.add(new LondeClient.Turn("assistant",result.text));
+                    recentReply="You: "+q+"\\n\\nLonde: "+result.text;
+                    if(londeReply!=null)londeReply.setText(recentReply);
+                    wakeStatus("LONDE REPLIED");
+                    if(voiceReady && londeSpeech!=null)londeSpeech.speak(
+                        result.text.length()>600?result.text.substring(0,600):result.text,
+                        TextToSpeech.QUEUE_FLUSH,null,"londe-home");
+                    handler.postDelayed(this::startWakeIfAllowed,1400);
+                });
+            }catch(Exception e){
+                handler.post(()->{
+                    replyBusy=false;
+                    recentReply="Londe couldn't answer. "+(e.getMessage()==null?"Try again.":e.getMessage());
+                    if(londeReply!=null)londeReply.setText(recentReply);
+                    wakeStatus("REQUEST FAILED");
+                    handler.postDelayed(this::startWakeIfAllowed,1800);
+                });
+            }
+        });
     }
 
     private void openLonde() {
@@ -1434,6 +1581,9 @@ public final class MainActivity extends Activity {
         setting("Classic home", "Original dashboard and essential app tiles", () -> show("classic"));
         setting("Intent-first home", "Default home · local commands and recommendations", () -> show("home"));
         section(main, "LONDE ASSISTANT", null, null);
+        setting("Voice wake: Hey Londe", prefs.getBoolean("londe_wake_enabled",false)
+            ? "Enabled on Home (foreground only)" : "Off · opt-in on-device recognition",
+            () -> configureWake());
         setting("Londe assistant", "Voice-first assistant · answers and device commands", this::openLonde);
         section(main, "CHATGPT", null, null);
         setting(ChatGptAuth.isConnected(this) ? "ChatGPT account · Connected" : "Connect ChatGPT",
