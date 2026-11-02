@@ -5,6 +5,9 @@ import android.content.Intent;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.Handler;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
@@ -146,13 +149,13 @@ final class ChatGptAuth {
                         throw new IllegalStateException("Could not save ChatGPT registration");
                 } else if (callbackClient != null && !callbackClient.equals(issued))
                     throw new SecurityException("OAuth client ID changed");
-                JSONObject tokens = formPost(TOKEN_URL,
+                JSONObject tokens = formPost(activity, TOKEN_URL,
                     "grant_type", "authorization_code",
                     "client_id", issued, "code", code,
                     "code_verifier", verifier, "redirect_uri", redirect,
                     "resource", RESOURCE);
                 String idToken = tokens.getString("id_token");
-                JSONObject identity = validateIdToken(idToken, issued, nonce);
+                JSONObject identity = validateIdToken(activity, idToken, issued, nonce);
                 if (old != null && !old.optString("subject").equals(identity.getString("sub")))
                     throw new SecurityException("Sign-in account changed unexpectedly");
                 String granted = tokens.optString("scope", "");
@@ -215,7 +218,7 @@ final class ChatGptAuth {
         }
     }
 
-    private static JSONObject validateIdToken(String jwt, String clientId, String nonce)
+    private static JSONObject validateIdToken(Context context, String jwt, String clientId, String nonce)
             throws Exception {
         String[] parts = jwt.split("\\.");
         if (parts.length != 3) throw new SecurityException("Invalid ID token");
@@ -224,7 +227,7 @@ final class ChatGptAuth {
         if (!"RS256".equals(header.optString("alg")))
             throw new SecurityException("Unexpected token signing algorithm");
         String kid = header.getString("kid");
-        JSONObject jwks = getJson(JWKS_URL, null);
+        JSONObject jwks = getJson(context, JWKS_URL, null);
         JSONArray keys = jwks.getJSONArray("keys");
         boolean signatureValid = false;
         for (int i=0; i<keys.length(); i++) {
@@ -271,7 +274,7 @@ final class ChatGptAuth {
             return session.getString("access_token");
         String refresh = session.optString("refresh_token");
         if (refresh.isEmpty()) throw new IllegalStateException("Please reconnect ChatGPT");
-        JSONObject result = formPost(TOKEN_URL,
+        JSONObject result = formPost(context, TOKEN_URL,
                 "grant_type","refresh_token","client_id",session.getString("client_id"),
                 "refresh_token",refresh,"resource",RESOURCE);
         session.put("access_token", result.getString("access_token"));
@@ -313,68 +316,144 @@ final class ChatGptAuth {
     private static String enc(String value) throws Exception {
         return URLEncoder.encode(value, "UTF-8");
     }
-    private static JSONObject formPost(String endpoint, String... fields) throws Exception {
-        // Browser approval is not the end of sign-in: a second HTTPS request
-        // exchanges the short-lived authorization code. A transient DNS lookup
-        // failure should not immediately discard an otherwise valid attempt.
-        for (int attempt = 0; attempt < 3; attempt++) {
-            try {
-                return formPostOnce(endpoint, fields);
-            } catch (java.net.UnknownHostException ex) {
-                if (attempt == 2) throw ex;
-                Thread.sleep(attempt == 0 ? 500L : 1300L);
-            }
+    // Android may retain a stale process default network while the browser uses
+    // a different network. Retry a DNS failure via the currently active Android
+    // Network (which has its own resolver) without bypassing TLS or DNS policy.
+    private static HttpURLConnection connection(Context context, String endpoint,
+                                                boolean scoped) throws Exception {
+        URL url = new URL(endpoint);
+        if (scoped) {
+            ConnectivityManager cm = (ConnectivityManager) context.getSystemService(
+                    Context.CONNECTIVITY_SERVICE);
+            Network active = cm == null ? null : cm.getActiveNetwork();
+            if (active != null) return (HttpURLConnection) active.openConnection(url);
         }
-        throw new IllegalStateException("Token exchange failed");
+        return (HttpURLConnection) url.openConnection();
     }
 
-    private static JSONObject formPostOnce(String endpoint, String... fields) throws Exception {
-        StringBuilder body = new StringBuilder();
-        for (int i=0; i<fields.length; i+=2) {
-            if (i>0) body.append('&');
-            body.append(enc(fields[i])).append('=').append(enc(fields[i+1]));
+    private static JSONObject formPost(Context context, String endpoint, String... fields)
+            throws Exception {
+        java.net.UnknownHostException dns = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                return formPostOnce(context, endpoint, attempt == 1, fields);
+            } catch (java.net.UnknownHostException ex) {
+                dns = ex;
+                if (attempt != 2) Thread.sleep(attempt == 0 ? 350L : 950L);
+            }
         }
-        HttpURLConnection c = (HttpURLConnection)new URL(endpoint).openConnection();
+        throw dns == null ? new IllegalStateException("Code exchange failed") : dns;
+    }
+
+    private static JSONObject formPostOnce(Context context, String endpoint,
+                                           boolean networkScoped, String... fields)
+            throws Exception {
+        StringBuilder body = new StringBuilder();
+        for (int i = 0; i < fields.length; i += 2) {
+            if (i > 0) body.append('&');
+            body.append(enc(fields[i])).append('=').append(enc(fields[i + 1]));
+        }
+        HttpURLConnection c = connection(context, endpoint, networkScoped);
         c.setInstanceFollowRedirects(false);
         c.setRequestMethod("POST");
         c.setDoOutput(true);
         c.setConnectTimeout(10000);
         c.setReadTimeout(20000);
-        c.setRequestProperty("Content-Type","application/x-www-form-urlencoded");
+        c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
         try {
             try (OutputStream out = c.getOutputStream()) {
                 out.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }
-            if (c.getResponseCode()!=200) throw new IllegalStateException(
-                    "OpenAI authorization rejected the request (HTTP " + c.getResponseCode()+")");
+            int status = c.getResponseCode();
+            if (status != 200) throw new IllegalStateException(
+                    "OAuth token exchange failed (HTTP " + status + ")");
             return jsonFromInput(c);
         } finally { c.disconnect(); }
     }
 
-    static JSONObject getJson(String endpoint, String bearer) throws Exception {
+    static JSONObject getJson(Context context, String endpoint, String bearer)
+            throws Exception {
+        java.net.UnknownHostException dns = null;
         for (int attempt = 0; attempt < 3; attempt++) {
             try {
-                return getJsonOnce(endpoint, bearer);
+                return getJsonOnce(context, endpoint, bearer, attempt == 1);
             } catch (java.net.UnknownHostException ex) {
-                if (attempt == 2) throw ex;
-                Thread.sleep(attempt == 0 ? 500L : 1300L);
+                dns = ex;
+                if (attempt != 2) Thread.sleep(attempt == 0 ? 350L : 950L);
             }
         }
-        throw new IllegalStateException("Network request failed");
+        throw dns == null ? new IllegalStateException("Could not fetch identity") : dns;
     }
 
-    private static JSONObject getJsonOnce(String endpoint, String bearer) throws Exception {
-        HttpURLConnection c = (HttpURLConnection)new URL(endpoint).openConnection();
+    private static JSONObject getJsonOnce(Context context, String endpoint, String bearer,
+                                         boolean networkScoped) throws Exception {
+        HttpURLConnection c = connection(context, endpoint, networkScoped);
         c.setInstanceFollowRedirects(false);
         c.setConnectTimeout(10000);
         c.setReadTimeout(20000);
-        if (bearer != null) c.setRequestProperty("Authorization","Bearer "+bearer);
+        if (bearer != null) c.setRequestProperty("Authorization", "Bearer " + bearer);
         try {
-            if(c.getResponseCode()!=200)throw new IllegalStateException(
-                    "OpenAI request failed (HTTP " + c.getResponseCode()+")");
+            if (c.getResponseCode() != 200) throw new IllegalStateException(
+                    "OpenAI request failed (HTTP " + c.getResponseCode() + ")");
             return jsonFromInput(c);
-        } finally {c.disconnect();}
+        } finally { c.disconnect(); }
     }
+
+    /** Network status measured inside Quiet (not in Chrome), with no tokens. */
+    static String diagnose(Context context) {
+        StringBuilder report = new StringBuilder();
+        ConnectivityManager cm = (ConnectivityManager) context.getSystemService(
+                Context.CONNECTIVITY_SERVICE);
+        Network network = cm == null ? null : cm.getActiveNetwork();
+        NetworkCapabilities caps = cm == null || network == null ? null :
+                cm.getNetworkCapabilities(network);
+        report.append("Network: ");
+        if (caps == null) report.append("No active Android network");
+        else {
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) report.append("Wi-Fi");
+            else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))
+                report.append("Mobile data");
+            else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN))
+                report.append("VPN");
+            else report.append("Other");
+            report.append(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                    ? " (Android validated)" : " (not validated)");
+        }
+        report.append("\n");
+        try {
+            java.net.InetAddress[] resolved = java.net.InetAddress.getAllByName("auth.openai.com");
+            report.append("App DNS: OK (").append(resolved.length).append(" addresses)\n");
+        } catch (Exception e) { report.append("App DNS: FAILED (").append(e.getClass().getSimpleName()).append(")\n"); }
+        if (network != null) {
+            try {
+                java.net.InetAddress[] resolved = network.getAllByName("auth.openai.com");
+                report.append("Active-network DNS: OK (").append(resolved.length)
+                        .append(" addresses)\n");
+            } catch (Exception e) {
+                report.append("Active-network DNS: FAILED (")
+                        .append(e.getClass().getSimpleName()).append(")\n");
+            }
+        }
+        String endpoint = "https://auth.openai.com/.well-known/openid-configuration";
+        for (int i = 0; i < (network == null ? 1 : 2); i++) {
+            HttpURLConnection conn = null;
+            try {
+                conn = connection(context, endpoint, i == 1);
+                conn.setInstanceFollowRedirects(false);
+                conn.setConnectTimeout(5500);
+                conn.setReadTimeout(5500);
+                int status = conn.getResponseCode();
+                report.append(i == 0 ? "App HTTPS: " : "Network HTTPS: ")
+                        .append("HTTP ").append(status).append("\n");
+            } catch (Exception e) {
+                report.append(i == 0 ? "App HTTPS: " : "Network HTTPS: ")
+                        .append("FAILED (").append(e.getClass().getSimpleName()).append(")\n");
+            } finally { if (conn != null) conn.disconnect(); }
+        }
+        report.append("\nTests use HTTPS certificate verification. No account tokens are sent.");
+        return report.toString();
+    }
+
     private static JSONObject jsonFromInput(HttpURLConnection c) throws Exception {
         try (java.io.InputStream input = c.getInputStream();
              java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
