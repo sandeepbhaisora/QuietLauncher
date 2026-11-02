@@ -19,6 +19,11 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RadialGradient;
+import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -62,6 +67,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -158,6 +167,7 @@ public final class MainActivity extends Activity {
             return;
         }
         if (SystemClock.elapsedRealtime() - lastRefreshElapsed >= 15000) refreshAsync();
+        else if ("home".equals(page)) render();
     }
 
     // Intentionally no activity-wide gesture interception in v0.2:
@@ -313,8 +323,9 @@ public final class MainActivity extends Activity {
         scroll.addView(main);
         shell.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         switch (page) {
-            case "home": renderHome(); break;
-            case "intent": renderIntent(); break;
+            case "home": renderAiHome(); break;
+            case "classic": renderHome(); break;
+            case "intent": renderAiHome(); break;
             case "apps": renderApps(""); break;
             case "root": renderRoot(); break;
             case "inbox": renderInbox(); break;
@@ -354,6 +365,321 @@ public final class MainActivity extends Activity {
     }
 
     private void openWorkspace() { startSafe(new Intent(this, WorkspaceActivity.class)); }
+
+
+    /**
+     * Intent-first UI with context grounded in on-device state. This is a local
+     * command router and a visual assistant, NOT a running LLM or voice service.
+     */
+    private void renderAiHome() {
+        Calendar now = Calendar.getInstance();
+        int hour = now.get(Calendar.HOUR_OF_DAY);
+        String greeting = hour < 12 ? "Good morning." : (hour < 17 ? "Good afternoon." : "Good evening.");
+        String date = new SimpleDateFormat("EEE, d MMM", Locale.getDefault()).format(now.getTime());
+        LinearLayout meta = row();
+        meta.addView(label(date.toUpperCase(Locale.ROOT)), new LinearLayout.LayoutParams(0, -2, 1));
+        clockLive = text(new SimpleDateFormat("HH:mm", Locale.getDefault()).format(now.getTime()),
+                15, muted, true);
+        meta.addView(clockLive);
+        add(main, meta, 13);
+
+        LinearLayout hero = card();
+        hero.setPadding(dp(14), dp(18), dp(14), dp(18));
+        LinearLayout heroRow = row();
+        LinearLayout copy = column();
+        add(copy, label("QUIET  /  INTENT HOME"), 0);
+        add(copy, text(greeting, 25, ink, true), 11);
+        add(copy, text(focusActive() ? "One task at a time." : "What matters next?",
+                17, ink, false), 7);
+        add(copy, text("A calmer way to use your phone.", 12, muted, false), 7);
+        heroRow.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+        QuietFace face = new QuietFace();
+        face.setContentDescription("Quiet mascot, a smiling friendly face");
+        heroRow.addView(face, new LinearLayout.LayoutParams(dp(92), dp(108)));
+        hero.addView(heroRow);
+        add(main, hero, 13);
+
+        // Keep the primary input obvious, functional, and independently scrollable.
+        LinearLayout commandCard = card();
+        add(commandCard, label("TELL QUIET WHAT TO DO"), 0);
+        EditText command = new EditText(this);
+        command.setSingleLine(true);
+        command.setTextSize(15);
+        command.setTextColor(ink);
+        command.setHintTextColor(muted);
+        command.setHint("Focus for 25 min, train, open Maps…");
+        command.setImeOptions(EditorInfo.IME_ACTION_GO);
+        command.setPadding(dp(12), dp(13), dp(12), dp(13));
+        command.setBackground(shape(surface2, 4, line));
+        add(commandCard, command, 11);
+        Runnable execute = () -> runSmartCommand(command.getText().toString());
+        command.setOnEditorActionListener((v, action, event) -> {
+            if (action == EditorInfo.IME_ACTION_GO) { execute.run(); return true; }
+            return false;
+        });
+        TextView run = pill("DO IT  →", execute);
+        run.setContentDescription("Run local command");
+        add(commandCard, run, 11);
+        add(main, commandCard, 13);
+        add(main, text("On-device shortcuts, not an AI chatbot. No voice listening or automatic uploads.",
+                11, muted, false), 8);
+
+        section(main, "SUGGESTED FOR YOU", "VIEW ALL  ↗", () -> show("root"));
+        boolean hasDraft = !getSharedPreferences("quiet_workspace_v1", MODE_PRIVATE)
+                .getString("saved_text", "").trim().isEmpty();
+        boolean hasWorkout = recentWorkoutTime() > 0;
+        int activeSets = activeTrainingSets();
+        if (focusActive()) {
+            add(main, smartTile("CONTINUE FOCUS", "Your session is still running",
+                    "◉", this::focusDialog), 10);
+        } else if (activeSets > 0) {
+            add(main, smartTile("FINISH YOUR WORKOUT", activeSets + " set(s) waiting to be saved",
+                    "↗", this::openTraining), 10);
+        } else if (hasDraft) {
+            add(main, smartTile("RESUME WORKSPACE", "Continue your locally saved draft",
+                    "↗", this::openWorkspace), 10);
+        } else {
+            add(main, smartTile(hour >= 17 ? "TRAIN FOR 30 MIN" : "START A FOCUS SESSION",
+                    hour >= 17 ? "A balanced session for today" : "Create time for one important task",
+                    "↗", hour >= 17 ? () -> startTraining(30) : this::focusDialog), 10);
+        }
+
+        LinearLayout topActions = row();
+        topActions.addView(actionTile("TRAIN", "Workout plan",
+                "▤", () -> openTraining()), new LinearLayout.LayoutParams(0, dp(104), 1));
+        spaceHorizontal(topActions, 9);
+        topActions.addView(actionTile("WORKSPACE", hasDraft ? "Resume draft" : "Read or write",
+                "▧", this::openWorkspace), new LinearLayout.LayoutParams(0, dp(104), 1));
+        add(main, topActions, 9);
+        LinearLayout secondActions = row();
+        secondActions.addView(actionTile("FOCUS", focusActive() ? "In progress" : "Protect your time",
+                "◎", this::focusDialog), new LinearLayout.LayoutParams(0, dp(104), 1));
+        spaceHorizontal(secondActions, 9);
+        secondActions.addView(actionTile("APPS", "Everything installed",
+                "▦", () -> show("apps")), new LinearLayout.LayoutParams(0, dp(104), 1));
+        add(main, secondActions, 9);
+
+        section(main, "YOUR CURRENT CONTEXT", null, null);
+        LinearLayout context = card();
+        if (focusActive()) {
+            focusLive = text(remainingFocus(), 28, ink, true);
+            add(context, label("FOCUS SESSION  ·  REMAINING"), 0);
+            add(context, focusLive, 6);
+            add(context, text("Tap to adjust or stop", 12, muted, false), 4);
+            context.setOnClickListener(v -> focusDialog());
+        } else if (activeSets > 0) {
+            add(context, text(activeSets + " workout sets logged", 19, ink, true), 0);
+            add(context, text("Your unfinished training session is saved on this phone.",
+                    12, muted, false), 6);
+            context.setOnClickListener(v -> openTraining());
+        } else {
+            add(context, text("A clean slate.", 19, ink, true), 0);
+            add(context, text(hasWorkout ? "Your workouts are saved in Quiet Training." :
+                    "Start a focus session or choose a useful action above.", 12, muted, false), 7);
+        }
+        add(main, context, 9);
+
+        section(main, "QUICK ACCESS", "CLASSIC VIEW  ↗", () -> show("classic"));
+        List<App> fav = favorites();
+        if (!fav.isEmpty()) {
+            LinearLayout quick = row();
+            for (int i = 0; i < Math.min(3, fav.size()); i++) {
+                App a = fav.get(i);
+                TextView shortcut = pill(a.name, () -> open(a));
+                shortcut.setSingleLine(true);
+                shortcut.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(48), 1);
+                if (i > 0) lp.leftMargin = dp(7);
+                quick.addView(shortcut, lp);
+            }
+            add(main, quick, 9);
+        }
+        add(main, pill("OPEN CLASSIC HOME  ↗", () -> show("classic")), 13);
+        space(main, 24);
+    }
+
+    private LinearLayout smartTile(String title, String detail, String icon, Runnable action) {
+        LinearLayout tile = row();
+        tile.setPadding(dp(15), dp(15), dp(15), dp(15));
+        tile.setBackground(shape(accent, 4, line));
+        LinearLayout info = column();
+        add(info, text(title, 16, ink, true), 0);
+        add(info, text(detail, 12, muted, false), 7);
+        tile.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
+        tile.addView(text(icon, 24, ink, true));
+        tile.setOnClickListener(v -> action.run());
+        return tile;
+    }
+
+    private LinearLayout actionTile(String name, String subtitle, String symbol, Runnable action) {
+        LinearLayout tile = column();
+        tile.setPadding(dp(13), dp(13), dp(11), dp(11));
+        tile.setBackground(shape(surface, 4, line));
+        add(tile, text(symbol, 23, ink, false), 0);
+        add(tile, text(name, 15, ink, true), 9);
+        add(tile, text(subtitle, 11, muted, false), 5);
+        tile.setOnClickListener(v -> action.run());
+        tile.setContentDescription(name + ", " + subtitle);
+        return tile;
+    }
+
+    private long recentWorkoutTime() {
+        try {
+            String raw = getSharedPreferences("quiet_training_v1", MODE_PRIVATE)
+                    .getString("sessions", "[]");
+            JSONArray sessions = new JSONArray(raw);
+            JSONObject latest = sessions.optJSONObject(sessions.length() - 1);
+            return latest == null ? 0L : latest.optLong("finished", 0);
+        } catch (Exception ignored) { return 0L; }
+    }
+
+    private int activeTrainingSets() {
+        try {
+            String raw = getSharedPreferences("quiet_training_v1", MODE_PRIVATE)
+                    .getString("active", "[]");
+            return new JSONArray(raw).length();
+        } catch (Exception ignored) { return 0; }
+    }
+
+    private void startTraining(int minutes) {
+        if (minutes == 20 || minutes == 30 || minutes == 45) {
+            getSharedPreferences("quiet_training_v1", MODE_PRIVATE)
+                    .edit().putInt("minutes", minutes).apply();
+        }
+        openTraining();
+    }
+
+    private void runSmartCommand(String input) {
+        String q = input.toLowerCase(Locale.ROOT).trim()
+                .replaceAll("\\s+", " ");
+        if (q.isEmpty()) return;
+
+        // Explicit app-opening commands are routed through the existing app
+        // permissions, protected-app prompts and distraction interstitials.
+        Matcher launch = Pattern.compile("^(?:open|launch|start) (?:the )?(?:app )?(.+)$").matcher(q);
+        if (launch.matches()) {
+            String target = launch.group(1).trim();
+            if (target.equals("settings")) { show("settings"); return; }
+            if (target.equals("apps") || target.equals("app drawer")) { show("apps"); return; }
+            for (App app : apps) if (app.name.toLowerCase(Locale.ROOT).equals(target)) {
+                open(app); return;
+            }
+            for (App app : apps) if (app.name.toLowerCase(Locale.ROOT).contains(target)) {
+                open(app); return;
+            }
+            Toast.makeText(this, "No matching installed app. Try the Apps tab.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        if (q.matches(".*\\b(screen time|usage|phone time)\\b.*")) {
+            show("usage"); return;
+        }
+        if (q.matches(".*\\b(calendar|schedule)\\b.*")) {
+            openCalendar(); return;
+        }
+        if (q.matches(".*\\b(quick note|take a note|jot|notepad)\\b.*")) {
+            editNote(); return;
+        }
+        if (q.matches(".*\\b(workout|work out|train|training|exercise|fitness)\\b.*")) {
+            Matcher duration = Pattern.compile("\\b(\\d{1,3})\\s*(?:mins?|minutes?)\\b").matcher(q);
+            if (duration.find()) {
+                int mins = Integer.parseInt(duration.group(1));
+                if (mins != 20 && mins != 30 && mins != 45) {
+                    Toast.makeText(this, "Training currently supports 20, 30, or 45 minutes.",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                startTraining(mins);
+            } else openTraining();
+            return;
+        }
+        if (q.matches(".*\\b(focus|concentrate|deep work)\\b.*")) {
+            Matcher duration = Pattern.compile("\\b(\\d{1,3})\\s*(?:mins?|minutes?)\\b").matcher(q);
+            if (duration.find()) {
+                int mins = Integer.parseInt(duration.group(1));
+                if (mins > 0 && mins <= 180) {
+                    prefs.edit().putLong("focusUntil",
+                            System.currentTimeMillis() + mins * 60000L).apply();
+                    Toast.makeText(this, "Focus started: " + mins + " minutes",
+                            Toast.LENGTH_SHORT).show();
+                    show("home");
+                    render();
+                    return;
+                }
+            }
+            focusDialog(); return;
+        }
+        if (q.matches(".*\\b(read|write|workspace|article|document|summarize|summary|pdf)\\b.*")) {
+            openWorkspace(); return;
+        }
+        if (q.equals("apps") || q.equals("all apps")) { show("apps"); return; }
+        if (q.equals("settings")) { show("settings"); return; }
+        if (handleCommand(q)) return;
+
+        Toast.makeText(this, "I can open apps, start focus, train, show usage, or open Workspace.",
+                Toast.LENGTH_LONG).show();
+    }
+
+    /** Original two-eye character drawn with simple native shapes. */
+    private final class QuietFace extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private boolean blinkClosed;
+        private final Runnable blink = new Runnable() {
+            @Override public void run() {
+                if (!isAttachedToWindow()) return;
+                blinkClosed = true;
+                invalidate();
+                postDelayed(() -> {
+                    blinkClosed = false;
+                    invalidate();
+                    if (isAttachedToWindow()) postDelayed(blink, 4700);
+                }, 155);
+            }
+        };
+        QuietFace() { super(MainActivity.this); setLayerType(View.LAYER_TYPE_SOFTWARE, null); }
+        @Override protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            postDelayed(blink, 3100);
+        }
+        @Override protected void onDetachedFromWindow() {
+            removeCallbacks(blink);
+            super.onDetachedFromWindow();
+        }
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth(), h = getHeight();
+            float scale = Math.min(w / 110f, h / 110f);
+            canvas.save();
+            canvas.translate((w - 110 * scale) / 2f, (h - 110 * scale) / 2f);
+            canvas.scale(scale, scale);
+            paint.setShader(new RadialGradient(54, 45, 66,
+                    new int[]{isPaper() ? c("#C5D9C1") : c("#A6CFA8"),
+                            isPaper() ? c("#9BB79A") : c("#47664E")},
+                    null, Shader.TileMode.CLAMP));
+            paint.setStyle(Paint.Style.FILL);
+            canvas.drawOval(9, 13, 103, 104, paint);
+            paint.setShader(null);
+            paint.setColor(isPaper() ? c("#1E3926") : c("#F5F9EB"));
+            paint.setStrokeWidth(4.3f);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStyle(Paint.Style.STROKE);
+            Path leftEye = new Path();
+            if (blinkClosed) { leftEye.moveTo(29, 54); leftEye.lineTo(43, 54); }
+            else { leftEye.moveTo(29, 53); leftEye.quadTo(36, 45, 43, 53); }
+            canvas.drawPath(leftEye, paint);
+            Path rightEye = new Path();
+            if (blinkClosed) { rightEye.moveTo(67, 54); rightEye.lineTo(81, 54); }
+            else { rightEye.moveTo(67, 53); rightEye.quadTo(74, 45, 81, 53); }
+            canvas.drawPath(rightEye, paint);
+            Path smile = new Path();
+            smile.moveTo(48, 69);
+            smile.quadTo(56, 76, 64, 69);
+            canvas.drawPath(smile, paint);
+            paint.setStyle(Paint.Style.FILL);
+            canvas.restore();
+        }
+    }
 
     // An opt-in, keyboard-first concept screen. No fake AI outputs, microphone
     // claims, network access, or additional permissions.
@@ -751,6 +1077,9 @@ public final class MainActivity extends Activity {
     private void renderSettings() {
         add(main, text("Make it yours.", 34, ink, true), 17);
         add(main, text("No account. No ads. Your phone, your rules.", 14, muted, false), 5);
+        section(main, "HOME", null, null);
+        setting("Classic home", "Original dashboard and essential app tiles", () -> show("classic"));
+        setting("Intent-first home", "Default home · local commands and recommendations", () -> show("home"));
         section(main, "WORKSPACE", null, null);
         setting("Open in Quiet", "Read, edit and work with shared text and links", this::openWorkspace);
         section(main, "PHONE", null, null);
@@ -765,7 +1094,7 @@ public final class MainActivity extends Activity {
         setting("Manage Android widgets", "Choose useful home widgets", () -> show("widgets"));
         section(main, "ABOUT", null, null);
         LinearLayout about = card();
-        add(about, text("Quiet 0.3.0 — offline workspace preview", 14, ink, true), 0);
+        add(about, text("Quiet 0.5.0 — intent-first home", 14, ink, true), 0);
         add(about, text("Offline by default. No subscription, account, analytics or ad SDK. Notifications are handled by Android. App hiding and protection only apply inside Quiet.", 12, muted, false), 8);
         add(main, about, 10); space(main, 25);
     }
