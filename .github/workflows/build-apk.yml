@@ -45,6 +45,14 @@ jobs:
           mkdir -p /tmp/quiet-speech-tests
           javac -d /tmp/quiet-speech-tests app/src/main/java/dev/quiet/launcher/SpeechTextCleaner.java app/src/test/java/dev/quiet/launcher/SpeechTextCleanerTest.java
           java -cp /tmp/quiet-speech-tests dev.quiet.launcher.SpeechTextCleanerTest
+      - name: Test Hindi speech normalization (JVM)
+        run: |
+          mkdir -p /tmp/quiet-hindi-tests
+          javac -encoding UTF-8 -d /tmp/quiet-hindi-tests \
+            app/src/main/java/dev/quiet/launcher/SpeechTextCleaner.java \
+            app/src/main/java/dev/quiet/launcher/HindiSpeech.java \
+            app/src/test/java/dev/quiet/launcher/HindiSpeechTest.java
+          java -cp /tmp/quiet-hindi-tests dev.quiet.launcher.HindiSpeechTest
       # Never expose a persistent signing key to pull requests.
       - name: Prepare permanent signing for main builds
         if: github.event_name != 'pull_request'
