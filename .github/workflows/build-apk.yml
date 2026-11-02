@@ -45,8 +45,36 @@ jobs:
           mkdir -p /tmp/quiet-speech-tests
           javac -d /tmp/quiet-speech-tests app/src/main/java/dev/quiet/launcher/SpeechTextCleaner.java app/src/test/java/dev/quiet/launcher/SpeechTextCleanerTest.java
           java -cp /tmp/quiet-speech-tests dev.quiet.launcher.SpeechTextCleanerTest
+      # Never expose a persistent signing key to pull requests.
+      - name: Prepare permanent signing for main builds
+        if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE_B64: ${{ secrets.QUIET_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.QUIET_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.QUIET_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.QUIET_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for value in "$KEYSTORE_B64" "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD"; do
+            if [ -z "$value" ]; then
+              echo "::error::Permanent APK signing secrets are missing. See signing setup documentation."
+              exit 1
+            fi
+          done
+          mkdir -p "$RUNNER_TEMP/quiet-signing"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/quiet-signing/quiet-upload.jks"
+          chmod 600 "$RUNNER_TEMP/quiet-signing/quiet-upload.jks"
+          echo "QUIET_KEYSTORE_FILE=$RUNNER_TEMP/quiet-signing/quiet-upload.jks" >> "$GITHUB_ENV"
+          echo "QUIET_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "QUIET_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "QUIET_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
       - name: Assemble installable debug APK
+        env:
+          QUIET_VERSION_CODE: ${{ github.run_number + 1000 }}
         run: gradle --no-daemon :app:assembleDebug
+      - name: Delete temporary keystore
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/quiet-signing"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
