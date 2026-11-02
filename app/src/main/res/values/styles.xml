@@ -20,4 +20,18 @@
         <item name="android:statusBarColor">#F2F0E9</item>
         <item name="android:navigationBarColor">#F2F0E9</item>
     </style>
+    <style name="LondeOverlayDark" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowDimEnabled">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:colorAccent">#9DD7A8</item>
+    </style>
+    <style name="LondeOverlayPaper" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowDimEnabled">true</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:colorAccent">#467449</item>
+    </style>
 </resources>

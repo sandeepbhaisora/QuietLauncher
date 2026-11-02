@@ -469,7 +469,7 @@ public final class MainActivity extends Activity {
         TextView chat = pill("USE CHATGPT ACCOUNT  ✦",
                 () -> requestChatGptPlan(command.getText().toString()));
         add(commandCard, chat, 9);
-        add(commandCard, pill("ASK LONDE  ✦  CHAT", this::openLonde), 9);
+        add(commandCard, pill("◉  TALK TO LONDE", this::openLonde), 9);
         add(main, commandCard, 13);
         add(main, text("Local action router. Tap Speak for Android's speech service (it may use the network). No always-on listening.",
                 11, muted, false), 8);
@@ -683,7 +683,9 @@ public final class MainActivity extends Activity {
     }
 
     private void openLonde() {
-        startActivity(new Intent(this, LondeActivity.class));
+        Intent assistant = new Intent(this, LondeActivity.class);
+        assistant.putExtra("auto_listen", true);
+        startActivity(assistant);
     }
 
     private void handleLondeAction(String command) {
@@ -1425,7 +1427,7 @@ public final class MainActivity extends Activity {
         setting("Classic home", "Original dashboard and essential app tiles", () -> show("classic"));
         setting("Intent-first home", "Default home · local commands and recommendations", () -> show("home"));
         section(main, "LONDE ASSISTANT", null, null);
-        setting("Ask Londe", "Conversational AI · follow-up questions · voice · optional spoken replies", this::openLonde);
+        setting("Londe assistant", "Voice-first assistant · answers and device commands", this::openLonde);
         section(main, "CHATGPT", null, null);
         setting(ChatGptAuth.isConnected(this) ? "ChatGPT account · Connected" : "Connect ChatGPT",
                 ChatGptAuth.account(this) + " · Official open-source sign-in",
