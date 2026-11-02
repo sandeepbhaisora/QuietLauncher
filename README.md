@@ -1,3 +1,9 @@
+# Quiet v0.4 — Adaptive Workspace (prototype)
+
+Open in Quiet can now distinguish shared links, code-like text, Markdown headings, and ordinary text. The Explore view offers contextual actions, code/document section navigation, a local text-file picker, and focused snippets to copy or explicitly share with ChatGPT. No AI model executes in Quiet. No separate API billing; Android’s standard share intent hands information to ChatGPT only when requested.
+
+Important: outlines use basic local heuristics, not an AST parser. A link alone cannot reveal its webpage contents, and reading text files is size-limited. This is a prototype, not a general app wrapper.
+
 # Quiet Launcher — a calmer Android homescreen
 
 Quiet is an **original, native Android launcher** influenced by the idea of a distraction-free phone. It is not affiliated with Ratio / Blloc. The first version is built in Java with Android platform APIs—**no account, adverts, trackers, server, or third-party Android library**.
