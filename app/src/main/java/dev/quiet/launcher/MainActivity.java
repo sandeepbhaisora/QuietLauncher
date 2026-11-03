@@ -982,6 +982,55 @@ public final class MainActivity extends Activity {
             handleLondeAction(action);
             return;
         }
+        if (LocalBrainModels.installed(this) &&
+                prefs.getBoolean("londe_local_brain_enabled", true)) {
+            replyBusy = true;
+            wakeStatus("LOCAL QWEN3 THINKING");
+            if (londeReply != null) londeReply.setText("You: " + q + "\\n\\nThinking on this phone…");
+            StringBuilder history = new StringBuilder();
+            int start = Math.max(0, homeContext.size() - 6);
+            for (int i = start; i < homeContext.size(); i++) {
+                LondeClient.Turn turn = homeContext.get(i);
+                history.append(turn.role).append(": ")
+                        .append(turn.text.length() > 180 ?
+                                turn.text.substring(0, 180) : turn.text).append("\\n");
+            }
+            LocalBrain.ask(this, q, history.toString(), new LocalBrain.Callback() {
+                @Override public void onResult(String text, String suggestedAction,
+                                                boolean fallback, float speed) {
+                    if (isFinishing() || isDestroyed()) return;
+                    replyBusy = false;
+                    if (fallback) { homeAskOnline(q); return; }
+                    if (suggestedAction != null) {
+                        String allowed = LondeCommands.normalize(suggestedAction);
+                        if (allowed == null) { homeAskOnline(q); return; }
+                        recentReply = "Local AI proposed: " + allowed + "\\nReview before running.";
+                        if (londeReply != null) londeReply.setText(recentReply);
+                        wakeStatus("LOCAL AI · REVIEW ACTION");
+                        handleLondeAction(allowed);
+                        return;
+                    }
+                    homeContext.add(new LondeClient.Turn("user", q));
+                    homeContext.add(new LondeClient.Turn("assistant", text));
+                    while (homeContext.size() > 18) homeContext.remove(0);
+                    recentReply = "You: " + q + "\\n\\nLonde: " + text;
+                    if (londeReply != null) londeReply.setText(recentReply);
+                    wakeStatus(String.format(Locale.ROOT, "OFFLINE QWEN3 · %.1f TOK/S", speed));
+                    if ("response".equals(aiScene) && "home".equals(page)) render();
+                    speakLonde(text, "londe-local-ai-" + SystemClock.uptimeMillis());
+                }
+                @Override public void onError(String reason) {
+                    if (isFinishing() || isDestroyed()) return;
+                    replyBusy = false;
+                    homeAskOnline(q);
+                }
+            });
+            return;
+        }
+        homeAskOnline(q);
+    }
+
+    private void homeAskOnline(String q) {
         if(!ChatGptAuth.canUsePlan(this)){
             recentReply="Connect ChatGPT in Settings for Londe's general answers.";
             if(londeReply!=null)londeReply.setText(recentReply);
@@ -1776,24 +1825,129 @@ public final class MainActivity extends Activity {
                 ? "Active · system voice assistant" : "Tap to make Londe your default assistant";
     }
 
-    private void requestAssistantRole() {
-        if (android.os.Build.VERSION.SDK_INT >= 29) {
-            android.app.role.RoleManager roles =
-                    getSystemService(android.app.role.RoleManager.class);
-            if (roles != null &&
-                    roles.isRoleAvailable(android.app.role.RoleManager.ROLE_ASSISTANT)) {
-                if (roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)) {
-                    Toast.makeText(this, "Londe is already the Android assistant",
-                            Toast.LENGTH_LONG).show();
-                } else {
-                    startSafe(roles.createRequestRoleIntent(
-                            android.app.role.RoleManager.ROLE_ASSISTANT));
-                }
-                return;
+    // Samsung can ignore a role request or show no picker. Always offer a
+    // visible path to Android's own Default apps screen and an explicit result.
+    private void openAssistantDefaultApps() {
+        try {
+            startActivity(new Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS));
+        } catch (Exception ex) {
+            try {
+                startActivity(new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS));
+            } catch (Exception ignored) {
+                new AlertDialog.Builder(this)
+                        .setTitle("Open Samsung settings manually")
+                        .setMessage("Settings → Apps → Choose default apps → Digital assistant app → Digital assistant app. Select Quiet if Android lists it.")
+                        .setPositiveButton("OK", null).show();
             }
         }
-        // Manufacturer implementations can omit the role dialog. Don't claim success.
-        startSafe(new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS));
+    }
+
+    private void launchAssistantRoleRequest() {
+        if (android.os.Build.VERSION.SDK_INT < 29) {
+            openAssistantDefaultApps();
+            return;
+        }
+        android.app.role.RoleManager roles =
+                getSystemService(android.app.role.RoleManager.class);
+        if (roles == null || !roles.isRoleAvailable(android.app.role.RoleManager.ROLE_ASSISTANT)) {
+            new AlertDialog.Builder(this).setTitle("Assistant role unavailable")
+                    .setMessage("Samsung doesn't expose the assistant-role picker here. Try the system Default apps screen instead.")
+                    .setPositiveButton("Default apps", (d,w) -> openAssistantDefaultApps())
+                    .setNegativeButton("Cancel", null).show();
+            return;
+        }
+        if (roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)) {
+            new AlertDialog.Builder(this).setTitle("Assistant selected")
+                    .setMessage("Android reports Quiet already holds the assistant role.")
+                    .setPositiveButton("Default apps", (d,w) -> openAssistantDefaultApps())
+                    .setNegativeButton("OK", null).show();
+            return;
+        }
+        try {
+            startActivity(roles.createRequestRoleIntent(android.app.role.RoleManager.ROLE_ASSISTANT));
+        } catch (Exception ex) {
+            new AlertDialog.Builder(this).setTitle("Assistant picker didn't open")
+                    .setMessage("Samsung blocked or couldn't handle the role request. Open Default apps and check whether Quiet is listed under Digital assistant app.")
+                    .setPositiveButton("Default apps", (d,w) -> openAssistantDefaultApps())
+                    .setNegativeButton("Cancel", null).show();
+        }
+    }
+
+    private void requestAssistantRole() {
+        String status = assistantRoleStatus();
+        new AlertDialog.Builder(this)
+                .setTitle("Make Londe your phone assistant")
+                .setMessage("Android status: " + status +
+                        "\\n\\nOn Samsung, choose Settings → Apps → Choose default apps → Digital assistant app. Select Quiet if listed. This changes the Android assistant, not your launcher.")
+                .setPositiveButton("Open Default apps", (d,w) -> openAssistantDefaultApps())
+                .setNeutralButton("Request assistant role", (d,w) -> launchAssistantRoleRequest())
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    private void configureLocalBrain() {
+        String status = LocalBrainModels.status(this);
+        if (LocalBrainModels.installed(this)) {
+            boolean enabled = prefs.getBoolean("londe_local_brain_enabled", true);
+            new AlertDialog.Builder(this).setTitle("Local Qwen3 AI · ready")
+                    .setMessage(status + "\\n\\nUses local llama.cpp inference for general questions. Complex or uncertain answers can use the existing ChatGPT connection. No local AI usage fees. The 0.6B model can be slow or unreliable.")
+                    .setPositiveButton(enabled ? "Disable local AI" : "Enable local AI", (d,w) -> {
+                        prefs.edit().putBoolean("londe_local_brain_enabled", !enabled).apply();
+                        show("settings");
+                    })
+                    .setNeutralButton("Remove model", (d,w) -> new AlertDialog.Builder(this)
+                            .setTitle("Delete local AI model?")
+                            .setMessage("Remove the ~484 MB model. Conversation settings stay intact. Reopen Quiet before deleting if the model has already been loaded.")
+                            .setPositiveButton("Delete", (dialog, which) -> {
+                                try { LocalBrainModels.delete(this); show("settings"); }
+                                catch (Exception e) { Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show(); }
+                            }).setNegativeButton("Cancel", null).show())
+                    .setNegativeButton("Cancel", null).show();
+            return;
+        }
+        if (LocalBrainModels.needsVerification(this)) {
+            new AlertDialog.Builder(this).setTitle("Verify Qwen3 download")
+                    .setMessage("Downloaded model found. Verify its SHA-256 before loading native inference. Verification runs on a background worker.")
+                    .setPositiveButton("Verify", (d,w) -> verifyLocalBrain())
+                    .setNegativeButton("Cancel", null).show();
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("Download local AI model")
+                .setMessage(status + "\\n\\nQwen3 0.6B 4-bit requires approximately 484 MB of download storage plus memory for inference. Downloads over Wi-Fi only. Your voice model remains unchanged. Nothing will download until you approve.")
+                .setPositiveButton("Download / Retry", (d,w) -> {
+                    try {
+                        LocalBrainModels.startDownload(this);
+                        Toast.makeText(this, "Local Qwen3 model queued · Wi-Fi only", Toast.LENGTH_LONG).show();
+                        show("settings");
+                    } catch (Exception e) {
+                        Toast.makeText(this, "Could not start model download: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNeutralButton("Check status", (d,w) -> {
+                    Toast.makeText(this, LocalBrainModels.status(this), Toast.LENGTH_LONG).show();
+                    show("settings");
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void verifyLocalBrain() {
+        Toast.makeText(this, "Verifying 484 MB model in background", Toast.LENGTH_LONG).show();
+        background.execute(() -> {
+            try {
+                LocalBrainModels.verify(this);
+                handler.post(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        Toast.makeText(this, "Offline Qwen3 model verified · ready to test", Toast.LENGTH_LONG).show();
+                        show("settings");
+                    }
+                });
+            } catch (Exception ex) {
+                handler.post(() -> {
+                    if (!isFinishing() && !isDestroyed())
+                        new AlertDialog.Builder(this).setTitle("Model verification failed")
+                                .setMessage(ex.getMessage())
+                                .setPositiveButton("OK", null).show();
+                });
+            }
+        });
     }
 
     private void renderSettings() {
@@ -1808,6 +1962,17 @@ public final class MainActivity extends Activity {
             () -> configureWake());
         setting("Londe voice engine", "Choose offline voice · free neural TTS option", this::configureLondeVoice);
         setting("Londe assistant", "Voice-first assistant · answers and device commands", this::openLonde);
+        section(main, "LOCAL AI", null, null);
+        setting("On-device AI brain · Qwen3", LocalBrainModels.status(this),
+                this::configureLocalBrain);
+        setting("Test offline AI", "Ask Londe in airplane mode · watch for OFFLINE QWEN3",
+                () -> {
+                    if (!LocalBrainModels.installed(this)) {
+                        configureLocalBrain();
+                        return;
+                    }
+                    openLonde();
+                });
         section(main, "CHATGPT", null, null);
         setting(ChatGptAuth.isConnected(this) ? "ChatGPT account · Connected" : "Connect ChatGPT",
                 ChatGptAuth.account(this) + " · Official open-source sign-in",

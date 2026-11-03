@@ -523,6 +523,66 @@ public final class LondeActivity extends Activity {
             ui.postDelayed(() -> handoff(routing.action), 550);
             return;
         }
+        if (LocalBrainModels.installed(this) &&
+                getSharedPreferences("quiet_local_v1", MODE_PRIVATE)
+                    .getBoolean("londe_local_brain_enabled", true)) {
+            busy = true;
+            setPhase(Phase.THINKING, "LOCAL AI · QWEN3");
+            showAnswer("Thinking on your phone · no internet needed…");
+            StringBuilder context = new StringBuilder();
+            int first = Math.max(0, memory.size() - 6);
+            for (int i = first; i < memory.size(); i++) {
+                LondeClient.Turn turn = memory.get(i);
+                context.append(turn.role).append(": ")
+                        .append(turn.text.length() > 180 ?
+                                turn.text.substring(0, 180) : turn.text)
+                        .append("\\n");
+            }
+            final int id = ++requestGeneration;
+            LocalBrain.ask(this, q, context.toString(), new LocalBrain.Callback() {
+                @Override public void onResult(String text, String action, boolean fallback,
+                                               float speed) {
+                    if (isFinishing() || id != requestGeneration) return;
+                    busy = false;
+                    if (fallback) {
+                        askChatGpt(q);
+                        return;
+                    }
+                    if (action != null) {
+                        String permitted = LondeCommands.normalize(action);
+                        if (permitted == null) {
+                            askChatGpt(q);
+                            return;
+                        }
+                        setPhase(Phase.ACTION, "LOCAL AI · REVIEW ACTION");
+                        showAnswer("Local model suggests: " + permitted +
+                                "\\nReview this action in Quiet before anything runs.");
+                        say("I'll show the action for your review.");
+                        ui.postDelayed(() -> handoff(permitted), 650);
+                        return;
+                    }
+                    memory.add(new LondeClient.Turn("user", q));
+                    memory.add(new LondeClient.Turn("assistant", text));
+                    while (memory.size() > 24) memory.remove(0);
+                    showAnswer(text);
+                    setPhase(Phase.SPEAKING,
+                            String.format(Locale.ROOT, "OFFLINE QWEN3 · %.1f TOK/S", speed));
+                    say(text);
+                    if (!canSpeak()) voiceFinished();
+                }
+                @Override public void onError(String reason) {
+                    if (isFinishing() || id != requestGeneration) return;
+                    busy = false;
+                    toast(reason);
+                    askChatGpt(q);
+                }
+            });
+            return;
+        }
+        askChatGpt(q);
+    }
+
+    private void askChatGpt(String q) {
         if(!ChatGptAuth.canUsePlan(this)){
             showAnswer("Connect your ChatGPT account in Quiet Settings to answer questions.");
             setPhase(Phase.READY,"NOT CONNECTED");
