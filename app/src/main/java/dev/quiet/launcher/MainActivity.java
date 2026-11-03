@@ -886,7 +886,26 @@ public final class MainActivity extends Activity {
         if(replyBusy){wakeStatus("BUSY · TRY AGAIN");return;}
         stopWake();
         if(q.length()>700){wakeStatus("REQUEST TOO LONG");return;}
-        String action=LondeCommands.normalize(q);
+        LocalFirstRouter.Decision routing = LocalFirstRouter.route(q);
+        if (routing.kind == LocalFirstRouter.Kind.LOCAL_ANSWER) {
+            String response = LocalFirstRouter.localAnswer(routing,
+                    System.currentTimeMillis(),
+                    prefs.getLong("focusUntil", 0L), Locale.getDefault());
+            recentReply = "You: " + q + "\\n\\nLonde: " + response;
+            if (londeReply != null) londeReply.setText(recentReply);
+            wakeStatus("ANSWERED OFFLINE");
+            if ("response".equals(aiScene) && "home".equals(page)) render();
+            if (voiceReady && londeSpeech != null) {
+                londeSpeech.speak(HindiSpeech.prepare(response,
+                        londeSpeech.getVoice() != null ?
+                            londeSpeech.getVoice().getLocale() : Locale.getDefault()),
+                        TextToSpeech.QUEUE_FLUSH, null,
+                        "londe-local-" + SystemClock.uptimeMillis());
+            }
+            return;
+        }
+        String action = routing.kind == LocalFirstRouter.Kind.LOCAL_ACTION
+                ? routing.action : null;
         if(action!=null){
             recentReply="You asked: "+q+"\\nReview before running.";
             if(londeReply!=null)londeReply.setText(recentReply);
