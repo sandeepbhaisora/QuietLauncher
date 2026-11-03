@@ -1,4 +1,7 @@
-plugins { id("com.android.application") }
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
 
 // CI provides these only for trusted main-branch builds. PR builds keep the
 // disposable debug key and must never receive the permanent signing key.
@@ -40,6 +43,8 @@ android {
 
     androidResources { noCompress += listOf("onnx", "bin") }
 
+    kotlinOptions { jvmTarget = "17" }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -52,4 +57,6 @@ dependencies {
     // The Android sherpa-onnx AAR is implemented in Kotlin, even when called from Java.
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.1.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.0.21")
+    // Free, actual on-device llama.cpp inference with GGUF. No API/keys.
+    implementation("dev.ffmpegkit-maintained:llama-android:0.1.1")
 }
