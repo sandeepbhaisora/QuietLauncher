@@ -188,21 +188,24 @@ final class LocalNeuralVoice {
             if (!staged.renameTo(dest))
                 throw new IllegalStateException("Cannot install local model: " + name);
         }
-        OfflineTtsSupertonicModelConfig supertonic = OfflineTtsSupertonicModelConfig.builder()
-                .setDurationPredictor(new File(model, FILES[0]).getAbsolutePath())
-                .setTextEncoder(new File(model, FILES[1]).getAbsolutePath())
-                .setVectorEstimator(new File(model, FILES[2]).getAbsolutePath())
-                .setVocoder(new File(model, FILES[3]).getAbsolutePath())
-                .setTtsJson(new File(model, FILES[4]).getAbsolutePath())
-                .setUnicodeIndexer(new File(model, FILES[5]).getAbsolutePath())
-                .setVoiceStyle(new File(model, FILES[6]).getAbsolutePath())
-                .build();
-        OfflineTtsModelConfig modelConfig = OfflineTtsModelConfig.builder()
-                .setSupertonic(supertonic)
-                .setNumThreads(2)
-                .setDebug(false)
-                .build();
-        tts = new OfflineTts(OfflineTtsConfig.builder().setModel(modelConfig).build());
+        // The Android AAR exposes Kotlin data classes (setters), unlike the
+        // separate desktop Java example with builder() helpers.
+        OfflineTtsSupertonicModelConfig supertonic = new OfflineTtsSupertonicModelConfig();
+        supertonic.setDurationPredictor(new File(model, FILES[0]).getAbsolutePath());
+        supertonic.setTextEncoder(new File(model, FILES[1]).getAbsolutePath());
+        supertonic.setVectorEstimator(new File(model, FILES[2]).getAbsolutePath());
+        supertonic.setVocoder(new File(model, FILES[3]).getAbsolutePath());
+        supertonic.setTtsJson(new File(model, FILES[4]).getAbsolutePath());
+        supertonic.setUnicodeIndexer(new File(model, FILES[5]).getAbsolutePath());
+        supertonic.setVoiceStyle(new File(model, FILES[6]).getAbsolutePath());
+
+        OfflineTtsModelConfig modelConfig = new OfflineTtsModelConfig();
+        modelConfig.setSupertonic(supertonic);
+        modelConfig.setNumThreads(2);
+        modelConfig.setDebug(false);
+        OfflineTtsConfig config = new OfflineTtsConfig();
+        config.setModel(modelConfig);
+        tts = new OfflineTts(null, config);
     }
 
     void stop() {
