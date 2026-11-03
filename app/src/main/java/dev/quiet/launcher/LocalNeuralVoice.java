@@ -91,8 +91,10 @@ final class LocalNeuralVoice {
                 extra.put("lang", hindi ? "hi" : "en");
                 config.setExtra(extra);
 
-                GeneratedAudio audio = tts.generateWithConfigAndCallback(
-                        text, config, samples -> request == sequence.get() && !closed ? 1 : 0);
+                // The JNI callback variant can SIGABRT on Android when native
+                // worker threads invoke a callback with a stale JNIEnv pointer.
+                // Use the no-callback inference path to avoid that failure.
+                GeneratedAudio audio = tts.generateWithConfig(text, config);
                 if (closed || request != sequence.get()) return;
                 float[] samples = audio.getSamples();
                 int sampleRate = audio.getSampleRate();
