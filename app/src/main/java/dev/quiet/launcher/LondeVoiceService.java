@@ -21,6 +21,10 @@ import java.util.concurrent.Executors;
 public final class LondeVoiceService extends VoiceInteractionService {
     private static final String TAG = "LondeVoiceService";
     private static WeakReference<LondeVoiceService> current = new WeakReference<>(null);
+    // The system assistant and our foreground screens must not simultaneously
+    // attempt to own AudioRecord. A delayed rearm must respect these flags.
+    private static volatile boolean homeVisible;
+    private static volatile boolean conversationVisible;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService loader = Executors.newSingleThreadExecutor();
     private OfflineWakePipeline pipeline;
@@ -36,6 +40,7 @@ public final class LondeVoiceService extends VoiceInteractionService {
     /** Only a live, user-selected system assistant may listen persistently. */
     private boolean permitted() {
         return !destroyed
+                && !homeVisible && !conversationVisible
                 && isActiveService(this, new ComponentName(this, LondeVoiceService.class))
                 && getSharedPreferences("quiet_local_v1", MODE_PRIVATE)
                        .getBoolean("londe_wake_enabled", false)
@@ -94,6 +99,20 @@ public final class LondeVoiceService extends VoiceInteractionService {
             pipeline.stop();
             pipeline = null;
         }
+    }
+
+    /**
+     * Track which foreground surface owns the microphone. Calling rearmWake()
+     * while one of them is active must never re-start the background detector.
+     */
+    static void foregroundOwner(boolean home, boolean visible) {
+        if (home) homeVisible = visible;
+        else conversationVisible = visible;
+        LondeVoiceService instance = current.get();
+        if (instance != null) instance.ui.post(() -> {
+            if (visible) instance.stopWake();
+            else instance.ui.postDelayed(instance::startWakeIfAllowed, 900);
+        });
     }
 
     static void refreshWake() {
