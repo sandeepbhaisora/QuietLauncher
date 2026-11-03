@@ -41,7 +41,7 @@ object LocalBrain {
         worker.launch {
             try {
                 val safety = app.getSharedPreferences("quiet_local_brain", Context.MODE_PRIVATE)
-                if (!LocalBrainModels.installed(app)) {
+                if (!LocalBrainModelCatalog.installed(app)) {
                     main.post { callback.onError("Download the Qwen3 model in Quiet Settings first.") }
                     return@launch
                 }
@@ -70,7 +70,7 @@ object LocalBrain {
                             topP = 0.8f,
                             topK = 30
                         )
-                        model = Llama.loadModel(LocalBrainModels.model(app).absolutePath, config)
+                        model = Llama.loadModel(LocalBrainModelCatalog.model(app).absolutePath, config)
                         loaded = true
                     }
                     // Bounded local notes are never sent to the cloud fallback.
@@ -95,7 +95,12 @@ object LocalBrain {
                         For a personal fact you cannot verify, reply with exactly: [FALLBACK]
                         If you genuinely do not know, reply with exactly: [FALLBACK]
                         Device actions are validated by Quiet separately; do not pretend to carry out actions.
-                        No JSON unless explicitly offering an action. No preamble, markdown, reasoning, or meta commentary.
+                        Available phone tools: get_battery, get_time, get_focus_status, open_app.
+                        Only when the user explicitly requests a phone action, respond exactly as:
+                        {"tool":"get_battery"} or {"tool":"get_time"} or {"tool":"get_focus_status"}
+                        or {"tool":"open_app","app":"Spotify"}.
+                        Never propose sending, deleting, changing permissions, code execution or clicking security prompts.
+                        For general questions answer conversationally in plain text. No preamble, markdown or reasoning.
                         ${languageInstruction}
                         ${memoryInstruction}
                         Examples:
@@ -129,6 +134,15 @@ object LocalBrain {
                 if (body.equals("[FALLBACK]", ignoreCase = true)
                         || body.equals("fallback", ignoreCase = true)
                         || Regex("(?is).*\\[(?:fallback|error)(?::|\\]|\\s).*").matches(body)) {
+                    main.post { callback.onResult("", null, true, result.tokensPerSecond) }
+                    return@launch
+                }
+                val tool = LocalToolPolicy.fromModel(question, body)
+                if (tool.kind != LocalToolPolicy.Kind.NONE) {
+                    main.post { callback.onResult("", "TOOL:" + body, false, result.tokensPerSecond) }
+                    return@launch
+                }
+                if (body.startsWith("TOOL:", true) || body.contains("\"tool\"")) {
                     main.post { callback.onResult("", null, true, result.tokensPerSecond) }
                     return@launch
                 }
