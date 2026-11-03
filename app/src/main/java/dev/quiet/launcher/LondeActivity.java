@@ -1069,7 +1069,7 @@ public final class LondeActivity extends Activity {
                     while (memory.size() > 24) memory.remove(0);
                     showAnswer(text);
                     setPhase(Phase.SPEAKING,
-                            String.format(Locale.ROOT, "OFFLINE " + LocalBrainModelCatalog.label(this) + " · %.1f TOK/S", speed));
+                            String.format(Locale.ROOT, "OFFLINE " + LocalBrainModelCatalog.label(LondeActivity.this) + " · %.1f TOK/S", speed));
                     say(text);
                     if (!canSpeak()) voiceFinished();
                 }
