@@ -456,7 +456,7 @@ public final class MainActivity extends Activity {
             next.setContentDescription("Next screen");
             top.addView(next);
         }
-        if (!"home".equals(page)) shell.addView(top);
+        if (!"home".equals(page) && !page.startsWith("settings")) shell.addView(top);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(false); scroll.setVerticalScrollBarEnabled(false);
         main = column(); main.setPadding(dp(1), 0, dp(1), dp(14));
@@ -476,7 +476,8 @@ public final class MainActivity extends Activity {
                 renderSettingsDetails(); break;
             default: renderSettings(); break;
         }
-        if (!"home".equals(page)) shell.addView(bottomNav());
+        // Fixed bottom navigation keeps Home / Londe / Apps / Settings accessible.
+        shell.addView(bottomNav());
         // Build the whole screen detached, then attach once per navigation.
         setContentView(shell);
     }
