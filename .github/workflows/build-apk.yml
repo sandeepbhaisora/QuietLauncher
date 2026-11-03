@@ -61,6 +61,13 @@ jobs:
             app/src/main/java/dev/quiet/launcher/LocalFirstRouter.java \
             app/src/test/java/dev/quiet/launcher/LocalFirstRouterTest.java
           java -cp /tmp/quiet-routing-tests dev.quiet.launcher.LocalFirstRouterTest
+      - name: Test Qwen-first fallback policy (JVM)
+        run: |
+          mkdir -p /tmp/quiet-qwen-tests
+          javac -encoding UTF-8 -d /tmp/quiet-qwen-tests \
+            app/src/main/java/dev/quiet/launcher/LocalReplyPolicy.java \
+            app/src/test/java/dev/quiet/launcher/LocalReplyPolicyTest.java
+          java -cp /tmp/quiet-qwen-tests dev.quiet.launcher.LocalReplyPolicyTest
       # Never expose a persistent signing key to pull requests.
       - name: Prepare permanent signing for main builds
         if: github.event_name != 'pull_request'
