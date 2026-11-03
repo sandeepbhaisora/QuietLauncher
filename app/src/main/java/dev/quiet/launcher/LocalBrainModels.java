@@ -36,7 +36,21 @@ final class LocalBrainModels {
 
     static void startDownload(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE);
-        if (installed(context)) return;
+        if (installed(context) || needsVerification(context)) return;
+        DownloadManager manager = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+        if (manager == null) throw new IllegalStateException("Download Manager unavailable");
+        long previous = prefs.getLong("download_id", -1L);
+        if (previous >= 0) {
+            try (Cursor cursor = manager.query(new DownloadManager.Query().setFilterById(previous))) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int state = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+                    if (state == DownloadManager.STATUS_PENDING
+                            || state == DownloadManager.STATUS_RUNNING
+                            || state == DownloadManager.STATUS_PAUSED) return;
+                }
+            }
+            manager.remove(previous);
+        }
         File f = model(context);
         // Android DownloadManager requires destination to not exist on enqueue.
         if (f.exists() && !f.delete()) throw new IllegalStateException("Delete older model first");
@@ -47,8 +61,6 @@ final class LocalBrainModels {
         req.setAllowedOverRoaming(false);
         req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
         req.setDestinationInExternalFilesDir(context, "models", FILE);
-        DownloadManager manager = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-        if (manager == null) throw new IllegalStateException("Download Manager unavailable");
         long id = manager.enqueue(req);
         prefs.edit().putLong("download_id", id).putBoolean("verified", false).apply();
     }
