@@ -506,6 +506,11 @@ public final class LondeActivity extends Activity {
             ui.postDelayed(this::finish, 2400);
             return;
         }
+        String deviceResult = LondeSystemCommands.tryExecute(this, q);
+        if (deviceResult != null) {
+            localAnswer(q, deviceResult);
+            return;
+        }
         LocalFirstRouter.Decision routing = LocalFirstRouter.route(q);
         if (routing.kind == LocalFirstRouter.Kind.LOCAL_ANSWER) {
             long focusUntil = getSharedPreferences("quiet_local_v1", MODE_PRIVATE)
