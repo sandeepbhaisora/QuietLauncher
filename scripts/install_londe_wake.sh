@@ -42,7 +42,7 @@ for phrase, label in phrases:
         raise SystemExit("Unsupported wake tokens: " + repr((phrase, pieces)))
     lines.append(" ".join(pieces) + " :1.8 #0.28 @" + label)
 with open(output, "w", encoding="utf-8") as f:
-    f.write("\\n".join(lines) + "\\n")
+    f.write("\n".join(lines) + "\n")
 print("Generated wake phrases:", [p for p, _ in phrases])
 PY
 test -s "$DEST/keywords.txt"
