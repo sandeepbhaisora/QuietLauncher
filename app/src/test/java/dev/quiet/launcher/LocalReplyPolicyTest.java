@@ -35,6 +35,15 @@ public final class LocalReplyPolicyTest {
         check(!LocalReplyPolicy.usableLocalAnswer("kya hal chaal ho rahe",
                 "Yes, today is Tuesday, November 3, 2026."),
                 "Irrelevant date must be rejected");
+        check(!LocalReplyPolicy.usableLocalAnswer("Explain Java",
+                "I am Londe, an AI assistant. How can I help you?"),
+                "Unrelated assistant identity filler must escalate");
+        check(!LocalReplyPolicy.usableLocalAnswer("What is Kafka?",
+                "What is Kafka?"),
+                "Echoing the question is not a valid local answer");
+        check(LocalReplyPolicy.usableLocalAnswer("What is Kafka?",
+                "Kafka is a distributed append-only event log."),
+                "Relevant knowledge stays local");
         System.out.println("LocalReplyPolicyTest OK");
     }
 }

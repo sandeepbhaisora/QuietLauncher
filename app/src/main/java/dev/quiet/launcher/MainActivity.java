@@ -800,7 +800,7 @@ public final class MainActivity extends Activity {
         }
         boolean completed=status.startsWith("Downloaded");
         new AlertDialog.Builder(this).setTitle(pack.title)
-                .setMessage(status+"\\n\\nThe model downloads once over Wi-Fi. Quiet will install it into private storage, where it works offline. This reduces the size of the APK.")
+                .setMessage(status+"\n\nThe model downloads once over Wi-Fi. Quiet will install it into private storage, where it works offline. This reduces the size of the APK.")
                 .setPositiveButton(completed?"Install model":"Download model",(d,w)->{
                     if(completed) {
                         Toast.makeText(this,"Installing model…",Toast.LENGTH_LONG).show();
@@ -927,9 +927,10 @@ public final class MainActivity extends Activity {
             });
         } else if (voiceReady && londeSpeech != null) {
             londeSpeaking = true;
-            java.util.Locale locale = londeSpeech.getVoice() != null
-                    ? londeSpeech.getVoice().getLocale() : Locale.getDefault();
-            int started = londeSpeech.speak(HindiSpeech.prepare(text, locale),
+            String preferred = getSharedPreferences("londe_voice_v1", MODE_PRIVATE)
+                    .getString("tts_voice", "");
+            int started = londeSpeech.speak(AndroidSpeechOutput.prepare(
+                    londeSpeech, text, preferred),
                     TextToSpeech.QUEUE_FLUSH, null, utteranceId);
             if (started == TextToSpeech.ERROR) voiceCompleted(utteranceId);
         } else {
@@ -937,6 +938,41 @@ public final class MainActivity extends Activity {
             voiceCompleted(utteranceId);
         }
     }
+    private void configureOfflineSpeaker() {
+        if (!LocalNeuralVoice.modelPackaged(this)) {
+            manageOptionalPack(OptionalModelPacks.Pack.VOICE);
+            return;
+        }
+        SharedPreferences voice = getSharedPreferences("londe_voice_v1", MODE_PRIVATE);
+        int current = Math.max(0, Math.min(9, voice.getInt("neural_speaker_id", 6)));
+        String[] options = new String[10];
+        for (int i = 0; i < options.length; i++) options[i] = "Speaker " + (i + 1);
+        new AlertDialog.Builder(this).setTitle("Offline Supertonic speaker")
+                .setSingleChoiceItems(options, current, (dialog, which) -> {
+                    voice.edit().putInt("neural_speaker_id", which)
+                            .putString("voice_mode", "neural").apply();
+                    dialog.dismiss();
+                    speakLonde("नमस्ते भाई, कैसा चल रहा है?", "speaker-preview");
+                    if ("settings".equals(page)) render();
+                })
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    private void configureOfflineVoiceQuality() {
+        SharedPreferences voice = getSharedPreferences("londe_voice_v1", MODE_PRIVATE);
+        new AlertDialog.Builder(this).setTitle("Offline speech quality")
+                .setMessage("Higher quality uses 8 synthesis steps and may speak more slowly. Faster uses 5 steps.")
+                .setPositiveButton("Higher quality", (d,w) -> {
+                    voice.edit().putBoolean("neural_high_quality", true).apply();
+                    if ("settings".equals(page)) render();
+                })
+                .setNeutralButton("Faster", (d,w) -> {
+                    voice.edit().putBoolean("neural_high_quality", false).apply();
+                    if ("settings".equals(page)) render();
+                })
+                .setNegativeButton("Cancel", null).show();
+    }
+
     private void configureLondeVoice(){
         new AlertDialog.Builder(this).setTitle("Londe speech output")
             .setMessage("Supertonic 3 is a downloadable offline voice. Once installed it needs no connection; otherwise use Android voice. Status: " + OptionalModelPacks.status(this,OptionalModelPacks.Pack.VOICE))
@@ -1077,6 +1113,8 @@ public final class MainActivity extends Activity {
                 OfflineWakePipeline pipeline=new OfflineWakePipeline(this,
                         new OfflineWakePipeline.Events(){
                             @Override public void onWake() {
+                                if (generation != homeWakeGeneration || !foregroundHome
+                                        || !"home".equals(page)) return;
                                 homeWake=null;
                                 ++homeWakeGeneration;
                                 wakeStatus("HEY LONDE · DETECTED");
@@ -1090,6 +1128,7 @@ public final class MainActivity extends Activity {
                                     wakeStatus("HEY LONDE · MIC " + percent + "% · SAY WAKE PHRASE");
                             }
                             @Override public void onError(String reason) {
+                                if (generation != homeWakeGeneration || !foregroundHome) return;
                                 homeWake=null;
                                 android.util.Log.w("QuietWake",reason);
                                 wakeStatus("HEY LONDE · " + reason);
@@ -1123,7 +1162,7 @@ public final class MainActivity extends Activity {
             handler.post(()->{
                 if(isFinishing()||isDestroyed())return;
                 replyBusy=false;
-                recentReply="You: "+question+"\\n\\nSOURCE: ANDROID CALENDAR · ON-DEVICE\\n\\nLonde: "+answer;
+                recentReply="You: "+question+"\n\nSOURCE: ANDROID CALENDAR · ON-DEVICE\n\nLonde: "+answer;
                 if(londeReply!=null)londeReply.setText(recentReply);
                 wakeStatus("CALENDAR CHECK COMPLETE");
                 speakLonde(answer,"londe-calendar-"+SystemClock.uptimeMillis());
@@ -1146,7 +1185,7 @@ public final class MainActivity extends Activity {
             String response = LocalFirstRouter.localAnswer(routing,
                     System.currentTimeMillis(),
                     prefs.getLong("focusUntil", 0L), Locale.getDefault());
-            recentReply = "You: " + q + "\\n\\nSOURCE: LOCAL PHONE TOOLS\\n\\nLonde: " + response;
+            recentReply = "You: " + q + "\n\nSOURCE: LOCAL PHONE TOOLS\n\nLonde: " + response;
             if (londeReply != null) londeReply.setText(recentReply);
             wakeStatus("ANSWERED OFFLINE");
             if ("response".equals(aiScene) && "home".equals(page)) render();
@@ -1156,7 +1195,7 @@ public final class MainActivity extends Activity {
         String action = routing.kind == LocalFirstRouter.Kind.LOCAL_ACTION
                 ? routing.action : null;
         if(action!=null){
-            recentReply="You asked: "+q+"\\nReview before running.";
+            recentReply="You asked: "+q+"\nReview before running.";
             if(londeReply!=null)londeReply.setText(recentReply);
             wakeStatus("ACTION TO REVIEW");
             handleLondeAction(action);
@@ -1166,14 +1205,14 @@ public final class MainActivity extends Activity {
                 prefs.getBoolean("londe_local_brain_enabled", true)) {
             replyBusy = true;
             wakeStatus("LOCAL QWEN3 THINKING");
-            if (londeReply != null) londeReply.setText("You: " + q + "\\n\\nThinking on this phone…");
+            if (londeReply != null) londeReply.setText("You: " + q + "\n\nThinking on this phone…");
             StringBuilder history = new StringBuilder();
             int start = Math.max(0, homeContext.size() - 6);
             for (int i = start; i < homeContext.size(); i++) {
                 LondeClient.Turn turn = homeContext.get(i);
                 history.append(turn.role).append(": ")
                         .append(turn.text.length() > 180 ?
-                                turn.text.substring(0, 180) : turn.text).append("\\n");
+                                turn.text.substring(0, 180) : turn.text).append("\n");
             }
             LocalBrain.ask(this, q, history.toString(), new LocalBrain.Callback() {
                 @Override public void onResult(String text, String suggestedAction,
@@ -1184,7 +1223,7 @@ public final class MainActivity extends Activity {
                     if (suggestedAction != null) {
                         String allowed = LondeCommands.normalize(suggestedAction);
                         if (allowed == null) { homeAskFallback(q); return; }
-                        recentReply = "Local AI proposed: " + allowed + "\\nReview before running.";
+                        recentReply = "Local AI proposed: " + allowed + "\nReview before running.";
                         if (londeReply != null) londeReply.setText(recentReply);
                         wakeStatus("LOCAL AI · REVIEW ACTION");
                         handleLondeAction(allowed);
@@ -1193,7 +1232,7 @@ public final class MainActivity extends Activity {
                     homeContext.add(new LondeClient.Turn("user", q));
                     homeContext.add(new LondeClient.Turn("assistant", text));
                     while (homeContext.size() > 18) homeContext.remove(0);
-                    recentReply = "You: " + q + "\\n\\nSOURCE: QWEN3 0.6B · ON-DEVICE\\n\\nLonde: " + text;
+                    recentReply = "You: " + q + "\n\nSOURCE: QWEN3 0.6B · ON-DEVICE\n\nLonde: " + text;
                     if (londeReply != null) londeReply.setText(recentReply);
                     wakeStatus(String.format(Locale.ROOT, "OFFLINE QWEN3 · %.1f TOK/S", speed));
                     if ("response".equals(aiScene) && "home".equals(page)) render();
@@ -1212,7 +1251,7 @@ public final class MainActivity extends Activity {
 
     private void homeAskFallback(String q) {
         if (!CloudAvailability.online(this)) {
-            recentReply = "You: " + q + "\\n\\nSOURCE: QWEN3 · OFFLINE FALLBACK\\n\\nLonde: " + LocalReplyPolicy.offlineMessage();
+            recentReply = "You: " + q + "\n\nSOURCE: QWEN3 · OFFLINE FALLBACK\n\nLonde: " + LocalReplyPolicy.offlineMessage();
             if (londeReply != null) londeReply.setText(recentReply);
             wakeStatus("OFFLINE · NO CHATGPT REQUEST");
             speakLonde(LocalReplyPolicy.offlineMessage(),
@@ -1220,7 +1259,7 @@ public final class MainActivity extends Activity {
             return;
         }
         if (!ChatGptAuth.canUsePlan(this)) {
-            recentReply = "You: " + q + "\\n\\nLonde: " + LocalReplyPolicy.unauthorizedMessage();
+            recentReply = "You: " + q + "\n\nLonde: " + LocalReplyPolicy.unauthorizedMessage();
             if (londeReply != null) londeReply.setText(recentReply);
             wakeStatus("CHATGPT NOT AUTHORIZED");
             return;
@@ -1236,7 +1275,7 @@ public final class MainActivity extends Activity {
             wakeStatus("CHATGPT NOT CONNECTED");return;
         }
         replyBusy=true;wakeStatus("LONDE THINKING…");
-        if(londeReply!=null)londeReply.setText("You: "+q+"\\n\\nThinking…");
+        if(londeReply!=null)londeReply.setText("You: "+q+"\n\nThinking…");
         homeContext.add(new LondeClient.Turn("user",q));
         if(homeContext.size()>18)homeContext.remove(0);
         List<LondeClient.Turn> history=new ArrayList<>(homeContext);
@@ -1245,13 +1284,13 @@ public final class MainActivity extends Activity {
                 LondeClient.Answer result=LondeClient.ask(this,history,assistantModel,
                     partial->handler.post(()->{
                         if(!isFinishing()&&londeReply!=null)
-                            londeReply.setText("You: "+q+"\\n\\n"+partial);
+                            londeReply.setText("You: "+q+"\n\n"+partial);
                     }));
                 handler.post(()->{
                     if(isFinishing()||isDestroyed())return;
                     assistantModel=result.model;replyBusy=false;
                     homeContext.add(new LondeClient.Turn("assistant",result.text));
-                    recentReply="You: "+q+"\\n\\nSOURCE: CHATGPT · "+result.model+" · ONLINE\\n\\nLonde: "+result.text;
+                    recentReply="You: "+q+"\n\nSOURCE: CHATGPT · "+result.model+" · ONLINE\n\nLonde: "+result.text;
                     if(londeReply!=null)londeReply.setText(recentReply);
                     wakeStatus("LONDE REPLIED");
                     if ("response".equals(aiScene) && "home".equals(page)) render();
@@ -1359,7 +1398,7 @@ public final class MainActivity extends Activity {
                             new AlertDialog.Builder(this).setTitle("ChatGPT request failed")
                                 .setMessage("No actions were run. " + e.getClass().getSimpleName()
                                     + ": " + (e.getMessage() == null ? "Unknown failure" : e.getMessage())
-                                    + "\\n\\nDon't paste access tokens or sensitive request data.")
+                                    + "\n\nDon't paste access tokens or sensitive request data.")
                                 .setPositiveButton("OK",null).show();
                         });
                     }
@@ -1498,7 +1537,7 @@ public final class MainActivity extends Activity {
         if (plan.needsPreview()) {
             StringBuilder preview = new StringBuilder();
             for (int i = 0; i < plan.steps.size(); i++)
-                preview.append(i + 1).append(". ").append(plan.steps.get(i).description()).append("\\n");
+                preview.append(i + 1).append(". ").append(plan.steps.get(i).description()).append("\n");
             new AlertDialog.Builder(this).setTitle("Review these actions")
                     .setMessage(preview.toString().trim())
                     .setNegativeButton("Cancel", null)
@@ -2078,7 +2117,7 @@ public final class MainActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle("Make Londe your phone assistant")
                 .setMessage("Android status: " + status +
-                        "\\n\\nOn Samsung, choose Settings → Apps → Choose default apps → Digital assistant app. Select Quiet if listed. This changes the Android assistant, not your launcher.")
+                        "\n\nOn Samsung, choose Settings → Apps → Choose default apps → Digital assistant app. Select Quiet if listed. This changes the Android assistant, not your launcher.")
                 .setPositiveButton("Open Default apps", (d,w) -> openAssistantDefaultApps())
                 .setNeutralButton("Request assistant role", (d,w) -> launchAssistantRoleRequest())
                 .setNegativeButton("Cancel", null).show();
@@ -2089,7 +2128,7 @@ public final class MainActivity extends Activity {
         if (LocalBrainModels.installed(this)) {
             boolean enabled = prefs.getBoolean("londe_local_brain_enabled", true);
             new AlertDialog.Builder(this).setTitle("Local Qwen3 AI · ready")
-                    .setMessage(status + "\\n\\nUses local llama.cpp inference for general questions. Complex or uncertain answers can use the existing ChatGPT connection. No local AI usage fees. The 0.6B model can be slow or unreliable.")
+                    .setMessage(status + "\n\nUses local llama.cpp inference for general questions. Complex or uncertain answers can use the existing ChatGPT connection. No local AI usage fees. The 0.6B model can be slow or unreliable.")
                     .setPositiveButton(enabled ? "Disable local AI" : "Enable local AI", (d,w) -> {
                         prefs.edit().putBoolean("londe_local_brain_enabled", !enabled).apply();
                         show("settings");
@@ -2112,7 +2151,7 @@ public final class MainActivity extends Activity {
             return;
         }
         new AlertDialog.Builder(this).setTitle("Download local AI model")
-                .setMessage(status + "\\n\\nQwen3 0.6B 4-bit requires approximately 484 MB of download storage plus memory for inference. Downloads over Wi-Fi only. Your voice model remains unchanged. Nothing will download until you approve.")
+                .setMessage(status + "\n\nQwen3 0.6B 4-bit requires approximately 484 MB of download storage plus memory for inference. Downloads over Wi-Fi only. Your voice model remains unchanged. Nothing will download until you approve.")
                 .setPositiveButton("Download / Retry", (d,w) -> {
                     try {
                         LocalBrainModels.startDownload(this);
@@ -2184,6 +2223,15 @@ public final class MainActivity extends Activity {
                 startActivity(diagnostic);
             });
         setting("Londe voice engine", "Choose offline voice · free neural TTS option", this::configureLondeVoice);
+        setting("Offline speaker", "Supertonic voice " +
+                (getSharedPreferences("londe_voice_v1", MODE_PRIVATE)
+                        .getInt("neural_speaker_id", 6) + 1) + " of 10 · tap to preview",
+                this::configureOfflineSpeaker);
+        setting("Offline speech quality",
+                getSharedPreferences("londe_voice_v1", MODE_PRIVATE)
+                        .getBoolean("neural_high_quality", true)
+                        ? "Higher quality · 8 steps" : "Faster · 5 steps",
+                this::configureOfflineVoiceQuality);
         setting("Londe assistant", "Voice-first assistant · answers and device commands", this::openLonde);
         section(main, "LOCAL AI", null, null);
         setting("On-device AI brain · Qwen3", LocalBrainModels.status(this),
@@ -2579,7 +2627,7 @@ public final class MainActivity extends Activity {
                     String recognized = matches.get(0);
                     if ("listening".equals(aiScene)) {
                         aiScene = "response";
-                        recentReply = "You: " + recognized + "\\n\\nReview your command before execution.";
+                        recentReply = "You: " + recognized + "\n\nReview your command before execution.";
                         render();
                         homeAsk(recognized);
                         return;

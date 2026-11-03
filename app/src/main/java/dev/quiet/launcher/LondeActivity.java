@@ -370,8 +370,9 @@ public final class LondeActivity extends Activity {
             voiceFinished();
             return;
         }
-        String spoken = HindiSpeech.prepare(shortened,
-                speech.getVoice()!=null ? speech.getVoice().getLocale() : Locale.getDefault());
+        String preferred = getSharedPreferences("londe_voice_v1", MODE_PRIVATE)
+                .getString("tts_voice", "");
+        String spoken = AndroidSpeechOutput.prepare(speech, shortened, preferred);
         int result=speech.speak(spoken, TextToSpeech.QUEUE_FLUSH, null,
                 "londe-"+SystemClock.uptimeMillis());
         if(result==TextToSpeech.ERROR)voiceFinished();
@@ -866,7 +867,7 @@ public final class LondeActivity extends Activity {
                 context.append(turn.role).append(": ")
                         .append(turn.text.length() > 180 ?
                                 turn.text.substring(0, 180) : turn.text)
-                        .append("\\n");
+                        .append("\n");
             }
             final int id = ++requestGeneration;
             LocalBrain.ask(this, q, context.toString(), new LocalBrain.Callback() {
@@ -886,7 +887,7 @@ public final class LondeActivity extends Activity {
                         }
                         setPhase(Phase.ACTION, "LOCAL AI · REVIEW ACTION");
                         showAnswer("Local model suggests: " + permitted +
-                                "\\nReview this action in Quiet before anything runs.");
+                                "\nReview this action in Quiet before anything runs.");
                         say("I'll show the action for your review.");
                         ui.postDelayed(() -> handoff(permitted), 650);
                         return;
@@ -976,7 +977,7 @@ public final class LondeActivity extends Activity {
     private void showStreaming(String partial) {
         if(phase!=Phase.THINKING)return;
         currentAnswer=partial;
-        answer.setText("SOURCE  /  " + answerSource + "\\n\\n" + partial);
+        answer.setText("SOURCE  /  " + answerSource + "\n\n" + partial);
     }
     private boolean looksLikeAction(String q) {
         // Explicit imperative commands only. Questions go to the assistant model.

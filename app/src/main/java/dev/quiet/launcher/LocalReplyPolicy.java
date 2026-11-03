@@ -39,6 +39,16 @@ final class LocalReplyPolicy {
         if (CalendarIntent.isPersonalSchedule(question)) return false;
         if (lower.contains("<think") || lower.contains("</think>")
                 || lower.startsWith("{\"type\"")) return false;
+        // Tiny local models can respond with identity/introduction filler
+        // instead of addressing a technical or conversational question.
+        boolean greeted = q.matches("(?s)^\\s*(hi|hello|hey|namaste|नमस्ते)[!.,? ]*$");
+        if (!greeted && lower.matches("(?s)^\\s*(?:hello[!,. ]+|hi[!,. ]+)?"
+                + "(?:i(?:'m| am) (?:londe|an? (?:ai )?assistant)|"
+                + "as an ai language model|i(?:'m| am) here to (?:help|assist))\\b.*"))
+            return false;
+        if (lower.replaceAll("[^\\p{L}\\p{N}]+", " ").trim()
+                .equals(q.replaceAll("[^\\p{L}\\p{N}]+", " ").trim()))
+            return false;
         if ((lower.contains("openai") || lower.contains("chatgpt"))
                 && (lower.contains("unreachable") || lower.contains("unable to reach")
                     || lower.contains("cannot connect") || lower.contains("can't connect")
