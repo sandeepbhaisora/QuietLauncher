@@ -795,7 +795,7 @@ public final class MainActivity extends Activity {
                                     if(isFinishing()||isDestroyed())return;
                                     Toast.makeText(this,pack.title+" installed",Toast.LENGTH_LONG).show();
                                     if(pack==OptionalModelPacks.Pack.WAKE)LondeVoiceService.refreshWake();
-                                    show("settings");
+                                    render();
                                 });
                             }catch(Exception ex){
                                 android.util.Log.e("OptionalModelPacks","Pack installation failed",ex);
@@ -810,7 +810,7 @@ public final class MainActivity extends Activity {
                         try {
                             OptionalModelPacks.download(this,pack);
                             Toast.makeText(this,"Download queued. Return here to check progress and install.",Toast.LENGTH_LONG).show();
-                            show("settings");
+                            render();
                         } catch(Exception ex) {
                             Toast.makeText(this,ex.getMessage(),Toast.LENGTH_LONG).show();
                         }
@@ -833,7 +833,7 @@ public final class MainActivity extends Activity {
                         prefs.edit().putBoolean("londe_wake_enabled", false).apply();
                         LondeVoiceService.refreshWake();
                         wakeStatus("VOICE WAKE OFF");
-                        show("settings");
+                        render();
                     }).setNegativeButton("Keep enabled", null).show();
             return;
         }
@@ -854,7 +854,7 @@ public final class MainActivity extends Activity {
                         }
                     }
                     wakeStatus("HEY LONDE · DETECTOR ENABLED");
-                    show("settings");
+                    render();
                 }).setNegativeButton("Cancel", null).show();
     }
 
