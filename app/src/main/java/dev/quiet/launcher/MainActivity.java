@@ -1776,24 +1776,63 @@ public final class MainActivity extends Activity {
                 ? "Active · system voice assistant" : "Tap to make Londe your default assistant";
     }
 
-    private void requestAssistantRole() {
-        if (android.os.Build.VERSION.SDK_INT >= 29) {
-            android.app.role.RoleManager roles =
-                    getSystemService(android.app.role.RoleManager.class);
-            if (roles != null &&
-                    roles.isRoleAvailable(android.app.role.RoleManager.ROLE_ASSISTANT)) {
-                if (roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)) {
-                    Toast.makeText(this, "Londe is already the Android assistant",
-                            Toast.LENGTH_LONG).show();
-                } else {
-                    startSafe(roles.createRequestRoleIntent(
-                            android.app.role.RoleManager.ROLE_ASSISTANT));
-                }
-                return;
+    // Samsung can ignore a role request or show no picker. Always offer a
+    // visible path to Android's own Default apps screen and an explicit result.
+    private void openAssistantDefaultApps() {
+        try {
+            startActivity(new Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS));
+        } catch (Exception ex) {
+            try {
+                startActivity(new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS));
+            } catch (Exception ignored) {
+                new AlertDialog.Builder(this)
+                        .setTitle("Open Samsung settings manually")
+                        .setMessage("Settings → Apps → Choose default apps → Digital assistant app → Digital assistant app. Select Quiet if Android lists it.")
+                        .setPositiveButton("OK", null).show();
             }
         }
-        // Manufacturer implementations can omit the role dialog. Don't claim success.
-        startSafe(new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS));
+    }
+
+    private void launchAssistantRoleRequest() {
+        if (android.os.Build.VERSION.SDK_INT < 29) {
+            openAssistantDefaultApps();
+            return;
+        }
+        android.app.role.RoleManager roles =
+                getSystemService(android.app.role.RoleManager.class);
+        if (roles == null || !roles.isRoleAvailable(android.app.role.RoleManager.ROLE_ASSISTANT)) {
+            new AlertDialog.Builder(this).setTitle("Assistant role unavailable")
+                    .setMessage("Samsung doesn't expose the assistant-role picker here. Try the system Default apps screen instead.")
+                    .setPositiveButton("Default apps", (d,w) -> openAssistantDefaultApps())
+                    .setNegativeButton("Cancel", null).show();
+            return;
+        }
+        if (roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)) {
+            new AlertDialog.Builder(this).setTitle("Assistant selected")
+                    .setMessage("Android reports Quiet already holds the assistant role.")
+                    .setPositiveButton("Default apps", (d,w) -> openAssistantDefaultApps())
+                    .setNegativeButton("OK", null).show();
+            return;
+        }
+        try {
+            startActivity(roles.createRequestRoleIntent(android.app.role.RoleManager.ROLE_ASSISTANT));
+        } catch (Exception ex) {
+            new AlertDialog.Builder(this).setTitle("Assistant picker didn't open")
+                    .setMessage("Samsung blocked or couldn't handle the role request. Open Default apps and check whether Quiet is listed under Digital assistant app.")
+                    .setPositiveButton("Default apps", (d,w) -> openAssistantDefaultApps())
+                    .setNegativeButton("Cancel", null).show();
+        }
+    }
+
+    private void requestAssistantRole() {
+        String status = assistantRoleStatus();
+        new AlertDialog.Builder(this)
+                .setTitle("Make Londe your phone assistant")
+                .setMessage("Android status: " + status +
+                        "\\n\\nOn Samsung, choose Settings → Apps → Choose default apps → Digital assistant app. Select Quiet if listed. This changes the Android assistant, not your launcher.")
+                .setPositiveButton("Open Default apps", (d,w) -> openAssistantDefaultApps())
+                .setNeutralButton("Request assistant role", (d,w) -> launchAssistantRoleRequest())
+                .setNegativeButton("Cancel", null).show();
     }
 
     private void renderSettings() {
