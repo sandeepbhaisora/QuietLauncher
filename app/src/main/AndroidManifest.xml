@@ -15,6 +15,14 @@
     <application android:label="Quiet" android:icon="@drawable/icon_quiet"
         android:allowBackup="false" android:supportsRtl="true"
         android:theme="@style/AppTheme">
+        <service android:name=".LondeNotificationListener"
+            android:label="Quiet · local notification reader"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService"/>
+            </intent-filter>
+        </service>
         <service android:name=".LondeVoiceService"
             android:label="Londe · Quiet OS"
             android:permission="android.permission.BIND_VOICE_INTERACTION"

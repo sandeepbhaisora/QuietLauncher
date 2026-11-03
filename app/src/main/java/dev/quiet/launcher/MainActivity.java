@@ -1176,6 +1176,13 @@ public final class MainActivity extends Activity {
         if(replyBusy){wakeStatus("BUSY · TRY AGAIN");return;}
         stopWake();
         if(q.length()>700){wakeStatus("REQUEST TOO LONG");return;}
+        if(PhoneAssistantActions.tryHandle(this,q,response -> {
+            recentReply="You: "+q+"\n\nSOURCE: ANDROID PHONE SKILLS · ON DEVICE\n\nLonde: "+response;
+            if(londeReply!=null)londeReply.setText(recentReply);
+            wakeStatus("LOCAL PHONE ACTION");
+            if ("response".equals(aiScene) && "home".equals(page)) render();
+            speakLonde(response,"londe-phone-"+SystemClock.uptimeMillis());
+        })) return;
         if(CalendarIntent.isPersonalSchedule(q)) {
             homeAnswerCalendar(q);
             return;
@@ -2233,6 +2240,12 @@ public final class MainActivity extends Activity {
                         ? "Higher quality · 8 steps" : "Faster · 5 steps",
                 this::configureOfflineVoiceQuality);
         setting("Londe assistant", "Voice-first assistant · answers and device commands", this::openLonde);
+        setting("Notification access", LondeNotificationListener.authorized(this)
+                ? (LondeNotificationListener.connected()
+                    ? "Enabled · reads only on request"
+                    : "Enabled · waiting for Android to connect")
+                : "Optional · check WhatsApp notifications locally",
+                () -> PhoneAssistantActions.requestNotificationAccess(this));
         section(main, "LOCAL AI", null, null);
         setting("On-device AI brain · Qwen3", LocalBrainModels.status(this),
                 this::configureLocalBrain);

@@ -44,6 +44,11 @@ public final class LocalReplyPolicyTest {
         check(LocalReplyPolicy.usableLocalAnswer("What is Kafka?",
                 "Kafka is a distributed append-only event log."),
                 "Relevant knowledge stays local");
+        check(!LocalReplyPolicy.usableLocalAnswer("Check WhatsApp messages",
+                "[FALLBACK]"), "Raw fallback token must never be shown");
+        check(!LocalReplyPolicy.usableLocalAnswer("Can you speak Hindi?",
+                "[ERROR: Cannot read phone calendars, messages, or location.]"),
+                "Raw model error token must not be shown");
         System.out.println("LocalReplyPolicyTest OK");
     }
 }

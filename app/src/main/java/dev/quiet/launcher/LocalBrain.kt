@@ -73,8 +73,16 @@ object LocalBrain {
                         model = Llama.loadModel(LocalBrainModels.model(app).absolutePath, config)
                         loaded = true
                     }
+                    val replyLocale = app.getSharedPreferences("quiet_local_v1",Context.MODE_PRIVATE)
+                        .getString("londe_reply_language", "auto")
+                    val languageInstruction = when(replyLocale) {
+                        "hi" -> "Reply in natural Hindi, using Devanagari script."
+                        "en" -> "Reply in English."
+                        else -> "Match the language of the latest user question."
+                    }
                     val instructions = """
                         You are Londe, a helpful voice assistant. Use the language the user uses.
+                        Never display bracketed control markers such as FALLBACK or ERROR in a normal reply.
                         Answer the CURRENT question directly in one or two sentences. Do not add a greeting unless the user greets you.
                         Never output an unrelated day, date or time. Do not repeat an earlier answer to a different question.
                         You cannot read phone calendars, messages, location or live information. Never invent the user's meetings, plans, or appointments.
@@ -83,6 +91,7 @@ object LocalBrain {
                         If you genuinely do not know, reply with exactly: [FALLBACK]
                         Device actions are validated by Quiet separately; do not pretend to carry out actions.
                         No JSON unless explicitly offering an action. No preamble, markdown, reasoning, or meta commentary.
+                        ${languageInstruction}
                         Examples:
                         User: kya haal chaal hai? -> Badhiya bhai, tu bata kaisa hai?
                         User: What is a race condition? -> A race condition occurs when timing affects the outcome of concurrent operations.
@@ -103,14 +112,15 @@ object LocalBrain {
                             history + "\nNew user request, answer this instead:\n" +
                             question.take(750) + "\n/no_think"
                     }
-                    Llama.complete(model!!, fullQuestion, instructions, 220)
+                    Llama.complete(model!!, fullQuestion, instructions, 140)
                     } finally {
                         safety.edit().remove("inference_in_progress").commit()
                     }
                 }
                 val body = result.text.trim().replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
                 if (body.equals("[FALLBACK]", ignoreCase = true)
-                        || body.equals("fallback", ignoreCase = true)) {
+                        || body.equals("fallback", ignoreCase = true)
+                        || Regex("(?is).*\\[(?:fallback|error)(?::|\\]|\\s).*").matches(body)) {
                     main.post { callback.onResult("", null, true, result.tokensPerSecond) }
                     return@launch
                 }
