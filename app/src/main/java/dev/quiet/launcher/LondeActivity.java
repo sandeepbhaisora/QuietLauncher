@@ -444,24 +444,19 @@ public final class LondeActivity extends Activity {
         if(q.isEmpty())return;
         if(q.length()>1500){localAnswer("Input","Please keep requests under 1500 characters.");return;}
         lastRequest.setText("YOU  /  "+q);
-        String normalized=q.toLowerCase(Locale.ROOT).replace('’','\'');
-        if(normalized.matches(".*\\b(what(?:'s| is)?|tell me|current|now)\\b.*\\btime\\b.*")
-                || normalized.matches(".*\\btime (?:right )?now\\b.*")) {
-            localAnswer(q,"It's "+new SimpleDateFormat("h:mm a",Locale.getDefault())
-                    .format(new Date())+".");
+        LocalFirstRouter.Decision routing = LocalFirstRouter.route(q);
+        if (routing.kind == LocalFirstRouter.Kind.LOCAL_ANSWER) {
+            long focusUntil = getSharedPreferences("quiet_local_v1", MODE_PRIVATE)
+                    .getLong("focusUntil", 0L);
+            localAnswer(q, LocalFirstRouter.localAnswer(routing,
+                    System.currentTimeMillis(), focusUntil, Locale.getDefault()));
             return;
         }
-        if(normalized.matches(".*\\b(what(?:'s| is)?|today's|which)\\b.*\\b(date|day)\\b.*")) {
-            localAnswer(q,"Today is "+new SimpleDateFormat("EEEE, d MMMM yyyy",
-                Locale.getDefault()).format(new Date())+".");
-            return;
-        }
-        String action=LondeCommands.normalize(q);
-        if(action!=null) {
-            setPhase(Phase.ACTION,"ACTION TO REVIEW");
+        if (routing.kind == LocalFirstRouter.Kind.LOCAL_ACTION) {
+            setPhase(Phase.ACTION, "ACTION TO REVIEW");
             showAnswer("I can help with that. Quiet will show you the action before anything runs.");
             say("I can do that. Please review the action.");
-            ui.postDelayed(()->handoff(action),550);
+            ui.postDelayed(() -> handoff(routing.action), 550);
             return;
         }
         if(!ChatGptAuth.canUsePlan(this)){
