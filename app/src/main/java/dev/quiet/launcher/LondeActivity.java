@@ -960,6 +960,12 @@ public final class LondeActivity extends Activity {
             localAnswer(q, remembered);
             return;
         }
+        LocalToolPolicy.Call directTool=LocalToolPolicy.direct(q);
+        if(LocalToolExecutor.readOnly(directTool)) {
+            answerSource="ANDROID · VERIFIED LOCAL TOOL";
+            localAnswer(q,LocalToolExecutor.describe(this,directTool));
+            return;
+        }
         if (PhoneAssistantActions.tryHandle(this, q, response -> {
             answerSource="ANDROID · PHONE SKILLS";
             localAnswer(q,response);
@@ -999,12 +1005,12 @@ public final class LondeActivity extends Activity {
             return;
         }
         LocalMemoryStore.countQuestion(this, q);
-        if (LocalBrainModels.installed(this) &&
+        if (LocalBrainModelCatalog.installed(this) &&
                 getSharedPreferences("quiet_local_v1", MODE_PRIVATE)
                     .getBoolean("londe_local_brain_enabled", true)) {
             busy = true;
             thinkingHum.begin();
-            answerSource = "QWEN3 0.6B · ON-DEVICE";
+            answerSource = LocalBrainModelCatalog.label(this) + " · ON-DEVICE";
             setPhase(Phase.THINKING, "LOCAL AI · QWEN3");
             showAnswer("Thinking on your phone · no internet needed…");
             StringBuilder context = new StringBuilder();
@@ -1028,6 +1034,23 @@ public final class LondeActivity extends Activity {
                         return;
                     }
                     if (action != null) {
+                        if(action.startsWith("TOOL:")) {
+                            LocalToolPolicy.Call call=LocalToolPolicy.fromModel(q,action.substring(5));
+                            if(LocalToolExecutor.readOnly(call)) {
+                                answerSource="ANDROID · VERIFIED LOCAL TOOL";
+                                localAnswer(q,LocalToolExecutor.describe(LondeActivity.this,call));
+                                return;
+                            }
+                            if(call.kind==LocalToolPolicy.Kind.APP_REVIEW) {
+                                setPhase(Phase.ACTION,"APP ACTION · REVIEW");
+                                showAnswer("Opening "+call.argument+" requires your review in Quiet.");
+                                say("I'll show that app action for review.");
+                                ui.postDelayed(()->handoff("open "+call.argument),650);
+                                return;
+                            }
+                            askChatGptFallback(q);
+                            return;
+                        }
                         String permitted = LondeCommands.normalize(action);
                         if (permitted == null) {
                             askChatGptFallback(q);
@@ -1046,7 +1069,7 @@ public final class LondeActivity extends Activity {
                     while (memory.size() > 24) memory.remove(0);
                     showAnswer(text);
                     setPhase(Phase.SPEAKING,
-                            String.format(Locale.ROOT, "OFFLINE QWEN3 · %.1f TOK/S", speed));
+                            String.format(Locale.ROOT, "OFFLINE " + LocalBrainModelCatalog.label(this) + " · %.1f TOK/S", speed));
                     say(text);
                     if (!canSpeak()) voiceFinished();
                 }
