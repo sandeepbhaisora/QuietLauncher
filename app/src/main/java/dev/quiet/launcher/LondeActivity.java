@@ -819,6 +819,10 @@ public final class LondeActivity extends Activity {
             ui.postDelayed(this::finish, 2400);
             return;
         }
+        if (PhoneAssistantActions.tryHandle(this, q, response -> {
+            answerSource="ANDROID · PHONE SKILLS";
+            localAnswer(q,response);
+        })) return;
         if (CalendarIntent.isPersonalSchedule(q)) {
             answerCalendar(q);
             return;

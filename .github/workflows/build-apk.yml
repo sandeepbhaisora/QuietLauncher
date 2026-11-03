@@ -68,6 +68,13 @@ jobs:
             app/src/main/java/dev/quiet/launcher/CalendarIntent.java \
             app/src/test/java/dev/quiet/launcher/CalendarIntentTest.java
           java -cp /tmp/quiet-calendar-tests dev.quiet.launcher.CalendarIntentTest
+      - name: Test deterministic phone intents (JVM)
+        run: |
+          mkdir -p /tmp/quiet-phone-intents
+          javac -encoding UTF-8 -d /tmp/quiet-phone-intents \
+            app/src/main/java/dev/quiet/launcher/PhoneAssistantIntent.java \
+            app/src/test/java/dev/quiet/launcher/PhoneAssistantIntentTest.java
+          java -cp /tmp/quiet-phone-intents dev.quiet.launcher.PhoneAssistantIntentTest
       - name: Test Qwen-first fallback policy (JVM)
         run: |
           mkdir -p /tmp/quiet-qwen-tests

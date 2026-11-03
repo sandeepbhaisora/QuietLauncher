@@ -39,6 +39,8 @@ final class LocalReplyPolicy {
         if (CalendarIntent.isPersonalSchedule(question)) return false;
         if (lower.contains("<think") || lower.contains("</think>")
                 || lower.startsWith("{\"type\"")) return false;
+        if (lower.matches("(?s).*\\[(?:fallback|error)(?::|\\]|\\s).*"))
+            return false;
         // Tiny local models can respond with identity/introduction filler
         // instead of addressing a technical or conversational question.
         boolean greeted = q.matches("(?s)^\\s*(hi|hello|hey|namaste|नमस्ते)[!.,? ]*$");
