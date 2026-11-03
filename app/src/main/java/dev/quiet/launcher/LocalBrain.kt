@@ -74,27 +74,35 @@ object LocalBrain {
                         loaded = true
                     }
                     val instructions = """
-                        You are Londe, a concise, warm Android assistant speaking natural Hindi/Hinglish or English.
-                        /no_think
-                        Answer using ONLY what you know. You have no internet, no personal calendar, no access to the phone screen.
-                        Never claim you performed any Android operation.
-                        Return ONLY one JSON object on one line:
-                        {"type":"answer","text":"..."} for a confident factual or conversational reply.
-                        {"type":"action","command":"..."} ONLY for explicit commands by the user, formatted as one command:
-                        open <installed app name>; start focus for <N> minutes; stop focus.
-                        {"type":"fallback"} when you are uncertain, need live/current data, or can't answer.
-                        Do not invent facts, app names, access permissions, or command results.
-                        Keep answers under 65 words. Never return markdown or reasoning.
+                        You are Londe, a helpful voice assistant. Use the language the user uses.
+                        Answer the CURRENT question directly in one or two sentences. Do not add a greeting unless the user greets you.
+                        Never output an unrelated day, date or time. Do not repeat an earlier answer to a different question.
+                        You cannot read phone calendars, messages, location or live information. Never invent the user's meetings, plans, or appointments.
+                        For a general knowledge question, give a concise factual answer as plain text.
+                        For a personal fact you cannot verify, reply with exactly: [FALLBACK]
+                        If you genuinely do not know, reply with exactly: [FALLBACK]
+                        Device actions are validated by Quiet separately; do not pretend to carry out actions.
+                        No JSON unless explicitly offering an action. No preamble, markdown, reasoning, or meta commentary.
+                        Examples:
+                        User: kya haal chaal hai? -> Badhiya bhai, tu bata kaisa hai?
+                        User: What is a race condition? -> A race condition occurs when timing affects the outcome of concurrent operations.
+                        User: Do I have any meetings today? -> [FALLBACK]
                     """.trimIndent()
-                    val fullQuestion = (if (recentContext.isBlank()) "" else
-                            "Earlier turns for context:\n" + recentContext.takeLast(600) + "\n") +
-                            "Current user request: /no_think " + question.take(750)
+                    // Avoid injecting a canned fake date or other stale assistant
+                    // messages into the tiny model's response context.
+                    val fullQuestion = "Answer this exact new request, not any earlier request:\n" +
+                            question.take(750) + "\n/no_think"
                     Llama.complete(model!!, fullQuestion, instructions, 180)
                     } finally {
                         safety.edit().remove("inference_in_progress").commit()
                     }
                 }
                 val body = result.text.trim().replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
+                if (body.equals("[FALLBACK]", ignoreCase = true)
+                        || body.equals("fallback", ignoreCase = true)) {
+                    main.post { callback.onResult("", null, true, result.tokensPerSecond) }
+                    return@launch
+                }
                 val start = body.indexOf('{')
                 val end = body.lastIndexOf('}')
                 if (start < 0 || end <= start) {
