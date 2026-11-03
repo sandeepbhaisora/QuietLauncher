@@ -60,8 +60,11 @@ public final class LondeActivity extends Activity {
     private boolean activeSession, recognizerRunning, inForeground=true;
     private String selectedEngine="";
     private int silenceCount;
-    private boolean usingDefaultRecognizer, triedDefaultRecognizer;
-    private int recognitionFailures;
+    private boolean usingOnDeviceRecognizer, triedAlternateRecognizer;
+    private boolean recognizerReady;
+    private int recognitionFailures, recognizerGeneration, recognitionAttempt;
+    private long recognizerStartedAt;
+    private static final long SPEECH_START_TIMEOUT_MS = 8000L;
     private boolean speechReady, readAloud = true, busy;
     private int requestGeneration = 0;
     private String model = "";
@@ -498,47 +501,71 @@ public final class LondeActivity extends Activity {
         }
     }
 
-    /** Start-only: auto-start + a rapid tap must never toggle the mic OFF. */
+    /** Start-only: automatic activation or a quick second tap cannot stop listening. */
     private void ensureListening() {
         if (isFinishing() || isDestroyed()) return;
         stopWakeDiagnostic();
         if (activeSession) {
-            if (!recognizerRunning && !busy) startRecognition();
-            else if (recognizerRunning) setPhase(Phase.LISTENING, "ALREADY LISTENING…");
+            if (busy || phase == Phase.SPEAKING) return;
+            if (recognizerRunning) {
+                if (!recognizerReady &&
+                        SystemClock.uptimeMillis() - recognizerStartedAt > 3000L) {
+                    // A second tap is a deliberate recovery from a stuck STARTING state.
+                    releaseRecognizer();
+                    setPhase(Phase.READY, "RESTARTING SPEECH SERVICE…");
+                    ui.postDelayed(this::startRecognition, 450);
+                } else {
+                    setPhase(Phase.LISTENING, recognizerReady
+                            ? "LISTENING · SPEAK NOW" : "STARTING SPEECH SERVICE…");
+                }
+            } else {
+                startRecognition();
+            }
             return;
         }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
-            setPhase(Phase.READY, "MIC PERMISSION NEEDED");
+            setPhase(Phase.READY, "MICROPHONE PERMISSION REQUIRED");
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_MIC);
             return;
         }
-        if (!SpeechRecognizer.isRecognitionAvailable(this)
-                && !SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
-            setPhase(Phase.READY, "NO SPEECH RECOGNIZER INSTALLED");
-            showAnswer("Android has no available speech recognition service. Install or enable Speech Recognition & Synthesis in Samsung/Google settings. TYPE still works.");
+        boolean systemAvailable = SpeechRecognizer.isRecognitionAvailable(this);
+        boolean offlineAvailable = SpeechRecognizer.isOnDeviceRecognitionAvailable(this);
+        if (!systemAvailable && !offlineAvailable) {
+            setPhase(Phase.READY, "SPEECH SERVICE NOT INSTALLED");
+            showAnswer("Android has no speech-recognition service. Enable or install your phone's Speech Recognition & Synthesis service. TYPE still works.");
             return;
         }
-        // The wake-word service owns raw PCM; release it before Android STT
-        // so both engines do not compete for the microphone.
-        LondeVoiceService.pauseWakeForSession();
+        // Default system recognition normally has the most reliable language
+        // support on Samsung. On-device availability does not guarantee en-IN
+        // or Hindi models are actually downloaded.
+        usingOnDeviceRecognizer = !systemAvailable && offlineAvailable;
+        triedAlternateRecognizer = usingOnDeviceRecognizer;
         activeSession = true;
-        silenceCount = 0;
         recognitionFailures = 0;
-        triedDefaultRecognizer = false;
-        usingDefaultRecognizer = false;
-        setPhase(Phase.READY, "STARTING MICROPHONE…");
-        ui.postDelayed(this::startRecognition, 240);
+        releaseRecognizer();
+        LondeVoiceService.pauseWakeForSession();
+        setPhase(Phase.READY, "PREPARING SPEECH SERVICE…");
+        ui.postDelayed(this::startRecognition, 550);
     }
 
-    /** Explicit stop is a long-press, not a second accidental tap. */
+    private void releaseRecognizer() {
+        recognizerGeneration++;
+        recognitionAttempt++;
+        recognizerRunning = false;
+        recognizerReady = false;
+        if (recognizer != null) {
+            try { recognizer.cancel(); } catch (Exception ignored) {}
+            try { recognizer.destroy(); } catch (Exception ignored) {}
+            recognizer = null;
+        }
+    }
+
+    /** Long-press TALK is an explicit stop. */
     private void stopListening() {
         stopWakeDiagnostic();
         activeSession = false;
-        if (recognizer != null) {
-            try { recognizer.cancel(); } catch (Exception ignored) {}
-            recognizerRunning = false;
-        }
+        releaseRecognizer();
         if (speech != null) speech.stop();
         if (neuralVoice != null) neuralVoice.stop();
         setPhase(Phase.READY, "SESSION STOPPED · TAP TO RESTART");
@@ -546,122 +573,169 @@ public final class LondeActivity extends Activity {
 
     private String recognizerIssue(int error) {
         switch (error) {
-            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT: return "Network timeout";
-            case SpeechRecognizer.ERROR_NETWORK: return "Network unavailable";
+            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT: return "Speech-service network timeout";
+            case SpeechRecognizer.ERROR_NETWORK: return "Speech service needs a connection";
             case SpeechRecognizer.ERROR_AUDIO: return "Microphone unavailable or in use";
             case SpeechRecognizer.ERROR_SERVER: return "Speech server unavailable";
             case SpeechRecognizer.ERROR_CLIENT: return "Speech service interrupted";
-            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT: return "No speech detected";
-            case SpeechRecognizer.ERROR_NO_MATCH: return "Couldn't understand speech";
+            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT: return "No speech heard";
+            case SpeechRecognizer.ERROR_NO_MATCH: return "Speech heard but no words recognized";
             case SpeechRecognizer.ERROR_RECOGNIZER_BUSY: return "Speech recognizer busy";
             case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS: return "Microphone permission denied";
-            case SpeechRecognizer.ERROR_TOO_MANY_REQUESTS: return "Too many recognition requests";
-            case 11: return "Speech recognizer disconnected";
-            case 12: return "Language not supported";
-            case 13: return "Speech language pack unavailable";
+            case SpeechRecognizer.ERROR_TOO_MANY_REQUESTS: return "Too many speech requests";
+            case SpeechRecognizer.ERROR_SERVER_DISCONNECTED: return "Speech recognizer disconnected";
+            case SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED: return "Speech language unsupported";
+            case SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE: return "Speech language pack not downloaded";
             default: return "Speech recognition error " + error;
         }
     }
 
-    private void switchToDefaultRecognizer(String reason) {
-        triedDefaultRecognizer = true;
-        usingDefaultRecognizer = true;
-        if (recognizer != null) {
-            try { recognizer.destroy(); } catch (Exception ignored) {}
-            recognizer = null;
-        }
+    private void stopWithSpeechError(String reason) {
+        activeSession = false;
+        releaseRecognizer();
+        setPhase(Phase.READY, "SPEECH INPUT NEEDS ATTENTION");
+        showAnswer(reason + ". Tap TALK to try again, or use TYPE. Check Android microphone access and the default Speech Recognition & Synthesis service.");
+    }
+
+    private boolean useOfflineAlternative(String reason) {
+        if (usingOnDeviceRecognizer || triedAlternateRecognizer
+                || !SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) return false;
+        triedAlternateRecognizer = true;
+        usingOnDeviceRecognizer = true;
+        releaseRecognizer();
+        setPhase(Phase.READY, reason + " · TRYING ON-DEVICE SPEECH");
+        ui.postDelayed(this::startRecognition, 1000);
+        return true;
+    }
+
+    private void speechError(int error, int generation) {
+        if (generation != recognizerGeneration || !activeSession || !inForeground) return;
         recognizerRunning = false;
-        setPhase(Phase.READY, reason + " · TRYING SYSTEM SPEECH");
-        ui.postDelayed(this::startRecognition, 500);
+        recognizerReady = false;
+        recognitionAttempt++; // Disarm both watchdog callbacks.
+
+        String reason = recognizerIssue(error);
+        android.util.Log.w("LondeSpeech", "Recognizer error " + error + " · " + reason +
+                " · offline=" + usingOnDeviceRecognizer);
+
+        if (error == SpeechRecognizer.ERROR_NO_MATCH ||
+                error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+            recognitionFailures++;
+            if (recognitionFailures >= 2) {
+                stopWithSpeechError("I couldn't transcribe what you said after two attempts");
+            } else {
+                setPhase(Phase.READY, reason.toUpperCase(Locale.ROOT) + " · RETRYING ONCE");
+                ui.postDelayed(this::startRecognition, 1300);
+            }
+            return;
+        }
+        if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ||
+                error == SpeechRecognizer.ERROR_AUDIO) {
+            stopWithSpeechError(reason);
+            return;
+        }
+        if (useOfflineAlternative(reason)) return;
+        stopWithSpeechError(reason);
     }
 
     private void startRecognition() {
-        if (!activeSession || busy || !inForeground || recognizerRunning) return;
+        if (!activeSession || busy || !inForeground || recognizerRunning
+                || phase == Phase.SPEAKING) return;
         if (recognizer == null) {
             try {
-                boolean onDevice = !usingDefaultRecognizer
-                        && SpeechRecognizer.isOnDeviceRecognitionAvailable(this);
-                recognizer = onDevice
+                recognizer = usingOnDeviceRecognizer
                         ? SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
                         : SpeechRecognizer.createSpeechRecognizer(this);
+                final int generation = ++recognizerGeneration;
                 recognizer.setRecognitionListener(new RecognitionListener() {
                     @Override public void onReadyForSpeech(Bundle b) {
-                        recognitionFailures = 0;
+                        if (generation != recognizerGeneration || !activeSession) return;
+                        recognizerReady = true;
                         setPhase(Phase.LISTENING, "LISTENING · SPEAK NOW");
                     }
-                    @Override public void onBeginningOfSpeech() { silenceCount = 0; }
+                    @Override public void onBeginningOfSpeech() {
+                        if (generation != recognizerGeneration) return;
+                        silenceCount = 0;
+                        setPhase(Phase.LISTENING, "HEARING YOUR VOICE…");
+                    }
                     @Override public void onRmsChanged(float v) {}
                     @Override public void onBufferReceived(byte[] b) {}
-                    @Override public void onEndOfSpeech() { setPhase(Phase.THINKING, "PROCESSING SPEECH…"); }
+                    @Override public void onEndOfSpeech() {
+                        if (generation == recognizerGeneration)
+                            setPhase(Phase.THINKING, "TRANSCRIBING YOUR WORDS…");
+                    }
                     @Override public void onError(int code) {
-                        recognizerRunning = false;
-                        if (!activeSession || !inForeground) return;
-                        String reason = recognizerIssue(code);
-                        if (!triedDefaultRecognizer && !usingDefaultRecognizer
-                                && (code == 12 || code == 13 || code == SpeechRecognizer.ERROR_CLIENT
-                                    || code == SpeechRecognizer.ERROR_SERVER
-                                    || code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY)) {
-                            switchToDefaultRecognizer(reason);
-                            return;
-                        }
-                        if (code == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
-                                || code == 12 || code == 13
-                                || code == SpeechRecognizer.ERROR_AUDIO
-                                || code == SpeechRecognizer.ERROR_TOO_MANY_REQUESTS
-                                || ++recognitionFailures >= 3) {
-                            activeSession = false;
-                            setPhase(Phase.READY, reason.toUpperCase(Locale.ROOT));
-                            showAnswer(reason + ". Tap TALK to retry, or use TYPE. If this persists, check Samsung microphone permission and installed speech services.");
-                            return;
-                        }
-                        setPhase(Phase.READY, reason + " · RETRYING");
-                        ui.postDelayed(LondeActivity.this::startRecognition, 1000);
+                        speechError(code, generation);
                     }
                     @Override public void onResults(Bundle b) {
+                        if (generation != recognizerGeneration || !activeSession) return;
                         recognizerRunning = false;
-                        ArrayList<String> words = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                        if (words != null && !words.isEmpty()) {
-                            silenceCount = 0;
+                        recognizerReady = false;
+                        recognitionAttempt++;
+                        ArrayList<String> words = b.getStringArrayList(
+                                SpeechRecognizer.RESULTS_RECOGNITION);
+                        if (words != null && !words.isEmpty() &&
+                                words.get(0) != null && !words.get(0).trim().isEmpty()) {
                             recognitionFailures = 0;
-                            accept(words.get(0));
-                        } else if (activeSession) {
-                            ui.postDelayed(LondeActivity.this::startRecognition, 600);
+                            accept(words.get(0).trim());
+                        } else {
+                            speechError(SpeechRecognizer.ERROR_NO_MATCH, generation);
                         }
                     }
                     @Override public void onPartialResults(Bundle b) {}
                     @Override public void onEvent(int type, Bundle extras) {}
                 });
             } catch (Exception error) {
-                if (!triedDefaultRecognizer && !usingDefaultRecognizer) {
-                    switchToDefaultRecognizer("Offline recognizer failed");
-                } else {
-                    activeSession = false;
-                    setPhase(Phase.READY, "SPEECH SERVICE UNAVAILABLE");
-                    showAnswer("Android could not start speech recognition: " + error.getClass().getSimpleName());
-                }
+                android.util.Log.e("LondeSpeech", "Speech engine init failed", error);
+                if (!useOfflineAlternative("System speech service unavailable"))
+                    stopWithSpeechError("Android could not initialize speech recognition");
                 return;
             }
         }
-        Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
-        i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
-        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN");
+
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
+        // Do not force en-IN: the installed recognizer may lack that language.
+        // Allow the user's configured speech language, plus detection on newer
+        // Android versions when the provider supports it.
+        if (android.os.Build.VERSION.SDK_INT >= 34)
+            intent.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_DETECTION, true);
+        final int generation = recognizerGeneration;
+        final int attempt = ++recognitionAttempt;
+        recognizerReady = false;
+        recognizerRunning = true;
+        recognizerStartedAt = SystemClock.uptimeMillis();
+        setPhase(Phase.LISTENING, usingOnDeviceRecognizer
+                ? "STARTING OFFLINE SPEECH SERVICE…" : "STARTING SYSTEM SPEECH SERVICE…");
         try {
-            recognizerRunning = true;
-            setPhase(Phase.LISTENING, "STARTING SPEECH SERVICE…");
-            recognizer.startListening(i);
+            recognizer.startListening(intent);
         } catch (Exception error) {
-            recognizerRunning = false;
-            if (!triedDefaultRecognizer && !usingDefaultRecognizer) {
-                switchToDefaultRecognizer("Offline speech unavailable");
-            } else {
-                activeSession = false;
-                setPhase(Phase.READY, "MIC / SPEECH SERVICE UNAVAILABLE");
-                showAnswer("Android failed to start speech recognition: " + error.getClass().getSimpleName());
-            }
+            android.util.Log.e("LondeSpeech", "Speech engine start failed", error);
+            if (!useOfflineAlternative("System speech service failed"))
+                stopWithSpeechError("Speech service could not start");
+            return;
         }
+        ui.postDelayed(() -> {
+            if (generation != recognizerGeneration || attempt != recognitionAttempt ||
+                    !activeSession || !inForeground || !recognizerRunning ||
+                    recognizerReady) return;
+            android.util.Log.w("LondeSpeech", "Speech recognizer never became ready");
+            if (!useOfflineAlternative("System speech startup timed out"))
+                stopWithSpeechError("Speech service never became ready");
+        }, SPEECH_START_TIMEOUT_MS);
+
+        // Protect against a recognizer that reports onReady but never delivers
+        // results or an error. Avoid an endlessly stuck LISTENING state.
+        ui.postDelayed(() -> {
+            if (generation != recognizerGeneration || attempt != recognitionAttempt ||
+                    !activeSession || !inForeground || !recognizerRunning) return;
+            stopWithSpeechError("Speech recognizer stopped responding");
+        }, 23000L);
     }
+
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){
         super.onRequestPermissionsResult(request,permissions,results);
         if (request == REQUEST_CALENDAR) {
@@ -694,7 +768,7 @@ public final class LondeActivity extends Activity {
     @Override protected void onPause(){
         stopWakeDiagnostic();
         inForeground=false;
-        if(recognizer!=null){recognizer.cancel();recognizerRunning=false;}
+        releaseRecognizer();
         super.onPause();
     }
     @Override protected void onResume(){
@@ -926,7 +1000,7 @@ public final class LondeActivity extends Activity {
         work.shutdownNow();
         ui.removeCallbacksAndMessages(null);
         activeSession=false;
-        if(recognizer!=null)recognizer.destroy();
+        releaseRecognizer();
         if(neuralVoice!=null)neuralVoice.close();
         if(speech!=null){speech.stop();speech.shutdown();}
         super.onDestroy();
