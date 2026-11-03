@@ -131,8 +131,26 @@ jobs:
       - name: Delete temporary keystore
         if: always()
         run: rm -rf "$RUNNER_TEMP/quiet-signing"
-      - name: Upload APK
+      - name: Upload full-feature APK (notification access requires trusted distribution)
         uses: actions/upload-artifact@v4
         with:
-          name: Quiet-debug-apk
+          name: Quiet-full-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Build standard sideload APK without notification access
+        run: |
+          python3 scripts/prepare_standard_manifest.py
+          gradle --no-daemon :app:assembleDebug
+          mkdir -p "$RUNNER_TEMP/quiet-standard"
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/quiet-standard/Quiet-standard.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$RUNNER_TEMP/quiet-standard/Quiet-standard.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump xmltree "$RUNNER_TEMP/quiet-standard/Quiet-standard.apk" AndroidManifest.xml > "$RUNNER_TEMP/quiet-standard/manifest.txt"
+          if grep -Eqi 'LondeNotificationListener|NotificationListenerService|BIND_NOTIFICATION_LISTENER_SERVICE' "$RUNNER_TEMP/quiet-standard/manifest.txt"; then
+            echo "::error::Standard APK still declares privileged notification listener"
+            exit 1
+          fi
+          echo "Verified: standard APK has no notification-listener registration."
+      - name: Upload standard APK (recommended for manual installation)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quiet-standard-apk
+          path: ${{ runner.temp }}/quiet-standard/Quiet-standard.apk

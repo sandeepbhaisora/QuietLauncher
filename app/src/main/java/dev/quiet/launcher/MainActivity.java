@@ -2335,11 +2335,13 @@ public final class MainActivity extends Activity {
                         ? "Higher quality · 8 steps" : "Faster · 5 steps",
                 this::configureOfflineVoiceQuality);
         setting("Londe assistant", "Voice-first assistant · answers and device commands", this::openLonde);
-        setting("Notification access", LondeNotificationListener.authorized(this)
-                ? (LondeNotificationListener.connected()
-                    ? "Enabled · reads only on request"
-                    : "Enabled · waiting for Android to connect")
-                : "Optional · check WhatsApp notifications locally",
+        setting("Notification access", !LondeNotificationListener.includedInBuild(this)
+                ? "Unavailable in standard APK · tap for details"
+                : LondeNotificationListener.authorized(this)
+                    ? (LondeNotificationListener.connected()
+                        ? "Enabled · reads only on request"
+                        : "Enabled · waiting for Android to connect")
+                    : "Optional · check WhatsApp notifications locally",
                 () -> PhoneAssistantActions.requestNotificationAccess(this));
         section(main, "LOCAL AI", null, null);
         setting("On-device memory", LocalMemoryStore.status(this),

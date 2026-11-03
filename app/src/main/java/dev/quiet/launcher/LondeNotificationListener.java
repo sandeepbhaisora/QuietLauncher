@@ -4,6 +4,7 @@ import android.app.Notification;
 import android.content.ComponentName;
 import android.provider.Settings;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
@@ -30,7 +31,18 @@ public final class LondeNotificationListener extends NotificationListenerService
         current = new WeakReference<>(null);
         super.onDestroy();
     }
+    /** True only when this installed APK declares the Android notification listener. */
+    static boolean includedInBuild(Context context) {
+        try {
+            context.getPackageManager().getServiceInfo(
+                    new ComponentName(context, LondeNotificationListener.class), 0);
+            return true;
+        } catch (PackageManager.NameNotFoundException unavailable) {
+            return false;
+        }
+    }
     static boolean authorized(Context context) {
+        if (!includedInBuild(context)) return false;
         String enabled = Settings.Secure.getString(context.getContentResolver(),
                 "enabled_notification_listeners");
         if (enabled == null || enabled.isEmpty()) return false;
