@@ -14,9 +14,27 @@
     <application android:label="Quiet" android:icon="@drawable/icon_quiet"
         android:allowBackup="false" android:supportsRtl="true"
         android:theme="@style/AppTheme">
+        <service android:name=".LondeVoiceService"
+            android:label="Londe · Quiet OS"
+            android:permission="android.permission.BIND_VOICE_INTERACTION"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService"/>
+            </intent-filter>
+            <meta-data android:name="android.voice_interaction"
+                android:resource="@xml/londe_voice_interaction"/>
+        </service>
+        <service android:name=".LondeSessionService"
+            android:permission="android.permission.BIND_VOICE_INTERACTION"
+            android:exported="true"/>
         <activity android:name=".TrainingActivity" android:exported="false"/>
-        <activity android:name=".LondeActivity" android:exported="false"
-            android:windowSoftInputMode="adjustResize"/>
+        <activity android:name=".LondeActivity" android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
         <activity android:name=".WorkspaceActivity"
             android:label="Open in Quiet"
             android:exported="true"
