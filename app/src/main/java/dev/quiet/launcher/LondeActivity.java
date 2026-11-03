@@ -483,6 +483,16 @@ public final class LondeActivity extends Activity {
         if(q.isEmpty())return;
         if(q.length()>1500){localAnswer("Input","Please keep requests under 1500 characters.");return;}
         lastRequest.setText("YOU  /  "+q);
+        String simple = q.toLowerCase(Locale.ROOT).trim().replaceAll("[.!?।]+$", "");
+        if (simple.matches("(?:hey londe[, ]+)?(?:stop londe|stop listening|go to sleep|बस कर|बंद हो जा|सो जा|chup ho ja|londe bas|londe stop)")) {
+            activeSession = false;
+            if (recognizer != null) { recognizer.cancel(); recognizerRunning = false; }
+            setPhase(Phase.READY, "GOING TO SLEEP");
+            showAnswer("Okay. Say Hey Londe when you need me.");
+            say("ठीक है भाई, फिर बुला लेना।");
+            ui.postDelayed(this::finish, 2400);
+            return;
+        }
         LocalFirstRouter.Decision routing = LocalFirstRouter.route(q);
         if (routing.kind == LocalFirstRouter.Kind.LOCAL_ANSWER) {
             long focusUntil = getSharedPreferences("quiet_local_v1", MODE_PRIVATE)
