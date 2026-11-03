@@ -1835,6 +1835,72 @@ public final class MainActivity extends Activity {
                 .setNegativeButton("Cancel", null).show();
     }
 
+    private void configureLocalBrain() {
+        String status = LocalBrainModels.status(this);
+        if (LocalBrainModels.installed(this)) {
+            boolean enabled = prefs.getBoolean("londe_local_brain_enabled", true);
+            new AlertDialog.Builder(this).setTitle("Local Qwen3 AI · ready")
+                    .setMessage(status + "\\n\\nUses local llama.cpp inference for general questions. Complex or uncertain answers can use the existing ChatGPT connection. No local AI usage fees. The 0.6B model can be slow or unreliable.")
+                    .setPositiveButton(enabled ? "Disable local AI" : "Enable local AI", (d,w) -> {
+                        prefs.edit().putBoolean("londe_local_brain_enabled", !enabled).apply();
+                        show("settings");
+                    })
+                    .setNeutralButton("Remove model", (d,w) -> new AlertDialog.Builder(this)
+                            .setTitle("Delete local AI model?")
+                            .setMessage("Remove the ~484 MB model. Conversation settings stay intact. Reopen Quiet before deleting if the model has already been loaded.")
+                            .setPositiveButton("Delete", (dialog, which) -> {
+                                try { LocalBrainModels.delete(this); show("settings"); }
+                                catch (Exception e) { Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show(); }
+                            }).setNegativeButton("Cancel", null).show())
+                    .setNegativeButton("Cancel", null).show();
+            return;
+        }
+        if (LocalBrainModels.needsVerification(this)) {
+            new AlertDialog.Builder(this).setTitle("Verify Qwen3 download")
+                    .setMessage("Downloaded model found. Verify its SHA-256 before loading native inference. Verification runs on a background worker.")
+                    .setPositiveButton("Verify", (d,w) -> verifyLocalBrain())
+                    .setNegativeButton("Cancel", null).show();
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("Download local AI model")
+                .setMessage(status + "\\n\\nQwen3 0.6B 4-bit requires approximately 484 MB of download storage plus memory for inference. Downloads over Wi-Fi only. Your voice model remains unchanged. Nothing will download until you approve.")
+                .setPositiveButton("Download / Retry", (d,w) -> {
+                    try {
+                        LocalBrainModels.startDownload(this);
+                        Toast.makeText(this, "Local Qwen3 model queued · Wi-Fi only", Toast.LENGTH_LONG).show();
+                        show("settings");
+                    } catch (Exception e) {
+                        Toast.makeText(this, "Could not start model download: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNeutralButton("Check status", (d,w) -> {
+                    Toast.makeText(this, LocalBrainModels.status(this), Toast.LENGTH_LONG).show();
+                    show("settings");
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void verifyLocalBrain() {
+        Toast.makeText(this, "Verifying 484 MB model in background", Toast.LENGTH_LONG).show();
+        background.execute(() -> {
+            try {
+                LocalBrainModels.verify(this);
+                handler.post(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        Toast.makeText(this, "Offline Qwen3 model verified · ready to test", Toast.LENGTH_LONG).show();
+                        show("settings");
+                    }
+                });
+            } catch (Exception ex) {
+                handler.post(() -> {
+                    if (!isFinishing() && !isDestroyed())
+                        new AlertDialog.Builder(this).setTitle("Model verification failed")
+                                .setMessage(ex.getMessage())
+                                .setPositiveButton("OK", null).show();
+                });
+            }
+        });
+    }
+
     private void renderSettings() {
         add(main, text("Make it yours.", 34, ink, true), 17);
         add(main, text("No account. No ads. Your phone, your rules.", 14, muted, false), 5);
@@ -1847,6 +1913,9 @@ public final class MainActivity extends Activity {
             () -> configureWake());
         setting("Londe voice engine", "Choose offline voice · free neural TTS option", this::configureLondeVoice);
         setting("Londe assistant", "Voice-first assistant · answers and device commands", this::openLonde);
+        section(main, "LOCAL AI", null, null);
+        setting("On-device AI brain · Qwen3", LocalBrainModels.status(this),
+                this::configureLocalBrain);
         section(main, "CHATGPT", null, null);
         setting(ChatGptAuth.isConnected(this) ? "ChatGPT account · Connected" : "Connect ChatGPT",
                 ChatGptAuth.account(this) + " · Official open-source sign-in",
