@@ -47,6 +47,8 @@ import java.util.concurrent.Executors;
 public final class LondeActivity extends Activity {
     private static final int REQUEST_MIC = 511;
     private static final int REQUEST_WAKE_TEST_MIC = 512;
+    private static final int REQUEST_CALENDAR = 513;
+    private String pendingCalendarQuestion;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService work = Executors.newSingleThreadExecutor();
     private final List<LondeClient.Turn> memory = new ArrayList<>();
@@ -662,6 +664,20 @@ public final class LondeActivity extends Activity {
     }
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){
         super.onRequestPermissionsResult(request,permissions,results);
+        if (request == REQUEST_CALENDAR) {
+            String question=pendingCalendarQuestion;
+            pendingCalendarQuestion=null;
+            if (question != null) {
+                if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED)
+                    answerCalendar(question);
+                else {
+                    answerSource="ANDROID CALENDAR · PERMISSION REQUIRED";
+                    localAnswer(question,
+                            "Calendar permission was not granted. I can't check your meetings. You can enable Calendar access in Android App Settings.");
+                }
+            }
+            return;
+        }
         if (request == REQUEST_WAKE_TEST_MIC) {
             if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED)
                 startWakeDiagnostic();
@@ -687,6 +703,30 @@ public final class LondeActivity extends Activity {
         if(activeSession&&!busy)ui.postDelayed(()->startRecognition(),550);
     }
 
+    private void answerCalendar(String question) {
+        answerSource = "ANDROID CALENDAR · ON-DEVICE";
+        if (checkSelfPermission(Manifest.permission.READ_CALENDAR)
+                != PackageManager.PERMISSION_GRANTED) {
+            pendingCalendarQuestion = question;
+            setPhase(Phase.READY, "CALENDAR PERMISSION REQUIRED");
+            showAnswer("I need Calendar permission to check your actual meetings. Android will ask for access. I will not invent your schedule.");
+            requestPermissions(new String[]{Manifest.permission.READ_CALENDAR}, REQUEST_CALENDAR);
+            return;
+        }
+        busy = true;
+        setPhase(Phase.THINKING, "READING YOUR CALENDAR");
+        final int id=++requestGeneration;
+        work.execute(() -> {
+            String result=LocalCalendarReader.read(this,question);
+            ui.post(() -> {
+                if (isFinishing() || id != requestGeneration) return;
+                busy=false;
+                answerSource="ANDROID CALENDAR · ON-DEVICE";
+                localAnswer(question,result);
+            });
+        });
+    }
+
     private void accept(String question) {
         if(busy)return;
         String q=question==null?"":question.trim();
@@ -702,6 +742,10 @@ public final class LondeActivity extends Activity {
             showAnswer("Okay. Say Hey Londe when you need me.");
             say("ठीक है भाई, फिर बुला लेना।");
             ui.postDelayed(this::finish, 2400);
+            return;
+        }
+        if (CalendarIntent.isPersonalSchedule(q)) {
+            answerCalendar(q);
             return;
         }
         LocalFirstRouter.Decision routing = LocalFirstRouter.route(q);
