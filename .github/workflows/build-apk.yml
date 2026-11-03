@@ -82,6 +82,13 @@ jobs:
             app/src/main/java/dev/quiet/launcher/LocalMemoryPolicy.java \
             app/src/test/java/dev/quiet/launcher/LocalMemoryPolicyTest.java
           java -cp /tmp/quiet-memory-tests dev.quiet.launcher.LocalMemoryPolicyTest
+      - name: Test spoken-only online consent policy (JVM)
+        run: |
+          mkdir -p /tmp/quiet-spoken-consent
+          javac -encoding UTF-8 -d /tmp/quiet-spoken-consent \
+            app/src/main/java/dev/quiet/launcher/SpokenOnlineConsent.java \
+            app/src/test/java/dev/quiet/launcher/SpokenOnlineConsentTest.java
+          java -cp /tmp/quiet-spoken-consent dev.quiet.launcher.SpokenOnlineConsentTest
       - name: Test Qwen-first fallback policy (JVM)
         run: |
           mkdir -p /tmp/quiet-qwen-tests

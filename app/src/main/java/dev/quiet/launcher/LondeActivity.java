@@ -57,6 +57,7 @@ public final class LondeActivity extends Activity {
     private TextToSpeech speech;
     private LocalNeuralVoice neuralVoice;
     private ThinkingHum thinkingHum;
+    private final SpokenOnlineConsent onlineConsent = new SpokenOnlineConsent();
     private SpeechRecognizer recognizer;
     private OfflineWakePipeline wakeDiagnostic;
     private int wakeDiagnosticGeneration;
@@ -118,6 +119,14 @@ public final class LondeActivity extends Activity {
         }
 
         initSpeech();
+        // Only Quiet's in-process Home flow can stage a pending voice approval;
+        // exported Intent extras cannot impersonate user consent.
+        String pendingHomeQuestion = SpokenOnlineConsent.consumeForVoiceConsole(
+                SystemClock.elapsedRealtime());
+        if (pendingHomeQuestion != null) {
+            ui.postDelayed(() -> beginSpokenOnlineConsent(pendingHomeQuestion), 900);
+            return;
+        }
         if (getIntent() != null && Intent.ACTION_ASSIST.equals(getIntent().getAction()))
             getIntent().putExtra("auto_listen", true);
         if (getIntent() != null && getIntent().getBooleanExtra("wake_diagnostic", false)) {
@@ -421,6 +430,27 @@ public final class LondeActivity extends Activity {
     }
     private void voiceFinished(){
         if(!inForeground||isFinishing())return;
+        if (onlineConsent.pending()) {
+            // Speech output finished: only now open the microphone.
+            if (!onlineConsent.listening()) {
+                onlineConsent.markListening(SystemClock.elapsedRealtime());
+                setPhase(Phase.READY, "SAY YES OR NO · VOICE ONLY");
+                final int consentGeneration=requestGeneration;
+                ui.postDelayed(() -> {
+                    if (onlineConsent.pending() && consentGeneration==requestGeneration
+                            && inForeground && !isFinishing()) startRecognition();
+                }, 350);
+                ui.postDelayed(() -> {
+                    if (onlineConsent.pending() && consentGeneration==requestGeneration) {
+                        onlineConsent.cancel();
+                        releaseRecognizer();
+                        answerSource="LONDE · OFFLINE ONLY";
+                        localAnswer("GPT permission", "No voice confirmation received. I kept your question offline.");
+                    }
+                }, SpokenOnlineConsent.RESPONSE_WINDOW_MS);
+            }
+            return;
+        }
         if (pendingVoiceNavigation != null) {
             Runnable next = pendingVoiceNavigation;
             pendingVoiceNavigation = null;
@@ -570,6 +600,7 @@ public final class LondeActivity extends Activity {
     /** Long-press TALK is an explicit stop. */
     private void stopListening() {
         stopWakeDiagnostic();
+        onlineConsent.cancel();
         activeSession = false;
         releaseRecognizer();
         if (speech != null) speech.stop();
@@ -597,6 +628,7 @@ public final class LondeActivity extends Activity {
     }
 
     private void stopWithSpeechError(String reason) {
+        onlineConsent.cancel();
         activeSession = false;
         releaseRecognizer();
         setPhase(Phase.READY, "SPEECH INPUT NEEDS ATTENTION");
@@ -621,6 +653,13 @@ public final class LondeActivity extends Activity {
         recognitionAttempt++; // Disarm both watchdog callbacks.
 
         String reason = recognizerIssue(error);
+        if (onlineConsent.pending()) {
+            onlineConsent.cancel();
+            releaseRecognizer();
+            answerSource="LONDE · OFFLINE ONLY";
+            localAnswer("GPT permission", "I couldn't hear a clear voice confirmation. I won't use GPT online.");
+            return;
+        }
         android.util.Log.w("LondeSpeech", "Recognizer error " + error + " · " + reason +
                 " · offline=" + usingOnDeviceRecognizer);
 
@@ -657,7 +696,8 @@ public final class LondeActivity extends Activity {
                     @Override public void onReadyForSpeech(Bundle b) {
                         if (generation != recognizerGeneration || !activeSession) return;
                         recognizerReady = true;
-                        setPhase(Phase.LISTENING, "LISTENING · SPEAK NOW");
+                        setPhase(Phase.LISTENING, onlineConsent.pending()
+                                ? "GPT PERMISSION · SAY YES OR NO" : "LISTENING · SPEAK NOW");
                     }
                     @Override public void onBeginningOfSpeech() {
                         if (generation != recognizerGeneration) return;
@@ -683,7 +723,9 @@ public final class LondeActivity extends Activity {
                         if (words != null && !words.isEmpty() &&
                                 words.get(0) != null && !words.get(0).trim().isEmpty()) {
                             recognitionFailures = 0;
-                            accept(words.get(0).trim());
+                            String heard=words.get(0).trim();
+                            if (onlineConsent.pending()) handleSpokenConsent(heard);
+                            else accept(heard);
                         } else {
                             speechError(SpeechRecognizer.ERROR_NO_MATCH, generation);
                         }
@@ -773,6 +815,7 @@ public final class LondeActivity extends Activity {
     }
     @Override protected void onPause(){
         stopWakeDiagnostic();
+        onlineConsent.cancel();
         inForeground=false;
         if (thinkingHum != null) thinkingHum.stop();
         releaseRecognizer();
@@ -810,6 +853,12 @@ public final class LondeActivity extends Activity {
 
     private void accept(String question) {
         if(busy)return;
+        if (onlineConsent.pending()) {
+            // TYPE never substitutes for spoken approval. Only fresh STT may approve.
+            answerSource="LONDE · AWAITING SPOKEN PERMISSION";
+            showAnswer("Please answer aloud with yes or no. No question has been sent online.");
+            return;
+        }
         String q=question==null?"":question.trim();
         if(q.isEmpty())return;
         if(q.length()>1500){localAnswer("Input","Please keep requests under 1500 characters.");return;}
@@ -935,7 +984,7 @@ public final class LondeActivity extends Activity {
             });
             return;
         }
-        askChatGpt(q);
+        askChatGptFallback(q);
     }
 
     /** Qwen failure is never silently passed to an unavailable cloud service. */
@@ -952,13 +1001,68 @@ public final class LondeActivity extends Activity {
             setPhase(Phase.READY, "CHATGPT NOT AUTHORIZED");
             return;
         }
-        answerSource = "CHATGPT · ONLINE FALLBACK";
-        setPhase(Phase.THINKING, "QWEN → CHATGPT FALLBACK");
-        askChatGpt(q);
+        beginSpokenOnlineConsent(q);
+    }
+
+    private void beginSpokenOnlineConsent(String question) {
+        if (isFinishing() || isDestroyed() || !inForeground) return;
+        if (!CloudAvailability.online(this) || !ChatGptAuth.canUsePlan(this)) {
+            answerSource="LONDE · OFFLINE ONLY";
+            localAnswer(question, "GPT online is unavailable. I won't send your question.");
+            return;
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED
+                || (!SpeechRecognizer.isRecognitionAvailable(this)
+                    && !SpeechRecognizer.isOnDeviceRecognitionAvailable(this))) {
+            answerSource="LONDE · OFFLINE ONLY";
+            showAnswer("Voice confirmation isn't available. Your question stays offline.");
+            setPhase(Phase.READY,"VOICE CONFIRMATION UNAVAILABLE");
+            return;
+        }
+        activeSession=true;
+        releaseRecognizer();
+        LondeVoiceService.pauseWakeForSession();
+        // No button, remembered permission, or model-generated assent can approve.
+        if (!canSpeak()) {
+            answerSource="LONDE · OFFLINE ONLY";
+            showAnswer("Voice output isn't ready, so I can't ask your permission aloud. Nothing was sent.");
+            setPhase(Phase.READY, "VOICE OUTPUT UNAVAILABLE");
+            return;
+        }
+        onlineConsent.begin(question);
+        answerSource="LONDE · ASKING FOR ONLINE PERMISSION";
+        String prompt="I couldn't answer that offline. Shall I use GPT online? Please say yes or no.";
+        showAnswer(prompt);
+        setPhase(Phase.SPEAKING,"SPOKEN PERMISSION REQUEST");
+        say(prompt);
+    }
+
+    private void handleSpokenConsent(String heard) {
+        if (!onlineConsent.pending()) return;
+        SpokenOnlineConsent.Reply decision=SpokenOnlineConsent.interpret(heard);
+        String question=decision==SpokenOnlineConsent.Reply.YES
+                ? onlineConsent.approve(SystemClock.elapsedRealtime()) : null;
+        if (decision!=SpokenOnlineConsent.Reply.YES || question==null) {
+            onlineConsent.cancel();
+            answerSource="LONDE · OFFLINE ONLY";
+            localAnswer("GPT permission", decision==SpokenOnlineConsent.Reply.NO
+                    ? "Okay, I'll keep it offline."
+                    : "I didn't hear a clear yes. Nothing was sent online.");
+            return;
+        }
+        if (!CloudAvailability.online(this) || !ChatGptAuth.canUsePlan(this)) {
+            answerSource="LONDE · OFFLINE ONLY";
+            localAnswer("GPT permission", "GPT isn't available now. Your question wasn't sent.");
+            return;
+        }
+        answerSource="CHATGPT · ONLINE · VOICE APPROVED";
+        askChatGpt(question);
     }
 
     private void askChatGpt(String q) {
-        if(!ChatGptAuth.canUsePlan(this)){
+        // All automatic callers must pass through spoken user consent.
+        if(!CloudAvailability.online(this) || !ChatGptAuth.canUsePlan(this)){
             showAnswer("Connect your ChatGPT account in Quiet Settings to answer questions.");
             setPhase(Phase.READY,"NOT CONNECTED");
             return;
@@ -1026,6 +1130,7 @@ public final class LondeActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        onlineConsent.cancel();
         stopWakeDiagnostic();
         LondeVoiceService.rearmWake();
         requestGeneration++;

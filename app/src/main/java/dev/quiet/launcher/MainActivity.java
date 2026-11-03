@@ -1340,7 +1340,7 @@ public final class MainActivity extends Activity {
             });
             return;
         }
-        homeAskOnline(q);
+        homeAskFallback(q);
     }
 
     private void homeAskFallback(String q) {
@@ -1358,8 +1358,13 @@ public final class MainActivity extends Activity {
             wakeStatus("CHATGPT NOT AUTHORIZED");
             return;
         }
-        wakeStatus("QWEN → CHATGPT FALLBACK");
-        homeAskOnline(q);
+        // Use the existing voice console for consent and microphone ownership.
+        // Do not send anything to GPT until it recognizes a fresh spoken yes.
+        wakeStatus("ASKING SPOKEN GPT PERMISSION");
+        recentReply="You: "+q+"\n\nLonde will ask aloud before using GPT online.";
+        if(londeReply!=null)londeReply.setText(recentReply);
+        SpokenOnlineConsent.stageForVoiceConsole(q,SystemClock.elapsedRealtime());
+        openLonde();
     }
 
     private void homeAskOnline(String q) {
