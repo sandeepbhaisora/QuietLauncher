@@ -749,13 +749,13 @@ public final class LondeActivity extends Activity {
                     if (isFinishing() || id != requestGeneration) return;
                     busy = false;
                     if (fallback) {
-                        askChatGpt(q);
+                        askChatGptFallback(q);
                         return;
                     }
                     if (action != null) {
                         String permitted = LondeCommands.normalize(action);
                         if (permitted == null) {
-                            askChatGpt(q);
+                            askChatGptFallback(q);
                             return;
                         }
                         setPhase(Phase.ACTION, "LOCAL AI · REVIEW ACTION");
@@ -777,12 +777,28 @@ public final class LondeActivity extends Activity {
                 @Override public void onError(String reason) {
                     if (isFinishing() || id != requestGeneration) return;
                     busy = false;
-                    toast(reason);
-                    askChatGpt(q);
+                    android.util.Log.w("LondeLocalBrain", "Local Qwen failed: " + reason);
+                    askChatGptFallback(q);
                 }
             });
             return;
         }
+        askChatGpt(q);
+    }
+
+    /** Qwen failure is never silently passed to an unavailable cloud service. */
+    private void askChatGptFallback(String q) {
+        if (!CloudAvailability.online(this)) {
+            localAnswer(q, LocalReplyPolicy.offlineMessage());
+            setPhase(Phase.READY, "OFFLINE · NO CHATGPT REQUEST");
+            return;
+        }
+        if (!ChatGptAuth.canUsePlan(this)) {
+            localAnswer(q, LocalReplyPolicy.unauthorizedMessage());
+            setPhase(Phase.READY, "CHATGPT NOT AUTHORIZED");
+            return;
+        }
+        setPhase(Phase.THINKING, "QWEN → CHATGPT FALLBACK");
         askChatGpt(q);
     }
 
@@ -817,10 +833,9 @@ public final class LondeActivity extends Activity {
             }catch(Exception ex){
                 ui.post(()->{
                     if(id!=requestGeneration||isFinishing())return;
-                    // Do not expose token, headers, request bodies or internal stack traces.
-                    String message=ex.getMessage()==null?"Connection unavailable":ex.getMessage();
-                    if(message.length()>160)message=message.substring(0,160);
-                    showAnswer("I couldn't complete that: "+message);
+                    // Never narrate raw OpenAI connection exceptions to the user.
+                    android.util.Log.w("LondeChatFallback", "ChatGPT request failed", ex);
+                    showAnswer(LocalReplyPolicy.cloudFailedMessage());
                     busy=false;
                     setPhase(Phase.READY,"TRY AGAIN");
                 });
