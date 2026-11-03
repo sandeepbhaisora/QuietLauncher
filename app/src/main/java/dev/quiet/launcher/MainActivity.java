@@ -848,6 +848,67 @@ public final class MainActivity extends Activity {
         render();
     }
 
+    private void configureWakeKeyword() {
+        boolean shortPhrase = prefs.getBoolean("londe_wake_short_enabled", false);
+        new AlertDialog.Builder(this).setTitle("Londe wake phrase")
+                .setMessage("Default: Hey Londe. Experimental: also respond to Londe alone. "
+                        + "A one-word hotword may activate unexpectedly or be missed. "
+                        + "Detection stays offline and requires the installed wake model.")
+                .setSingleChoiceItems(new String[]{
+                        "Hey Londe (recommended)",
+                        "Hey Londe or Londe (experimental)"}, shortPhrase ? 1 : 0,
+                        (dialog, which) -> {
+                            dialog.dismiss();
+                            boolean enabled=which==1;
+                            if(prefs.getBoolean("londe_wake_short_enabled",false)==enabled)return;
+                            prefs.edit().putBoolean("londe_wake_short_enabled",enabled).apply();
+                            stopWake();
+                            LondeVoiceService.refreshWake();
+                            handler.postDelayed(this::startWakeIfAllowed,650);
+                            render();
+                        })
+                .setNegativeButton("Cancel",null).show();
+    }
+
+    private void configureLocalMemory() {
+        String[] options={
+                LocalMemoryStore.enabled(this) ? "Turn memory OFF" : "Enable saved local memory",
+                "Review saved notes and topic interests",
+                "Erase all saved local memory",
+                prefs.getBoolean("londe_thinking_hum",true)
+                        ? "Turn thinking hum OFF" : "Turn thinking hum ON"
+        };
+        new AlertDialog.Builder(this).setTitle("Private Londe memory")
+                .setMessage("Saved memory is opt-in. Only explicit Remember commands "
+                        + "and broad question-category counts are saved to this phone. "
+                        + "No raw questions, notification text, messages or calendar entries are saved. "
+                        + "A short conversation context is held in RAM separately.")
+                .setItems(options,(dialog,which)-> {
+                    if(which==0) {
+                        LocalMemoryStore.enable(this,!LocalMemoryStore.enabled(this));
+                        render();
+                    } else if(which==1) {
+                        new AlertDialog.Builder(this).setTitle("Saved on this phone")
+                                .setMessage(LocalMemoryStore.describe(this))
+                                .setPositiveButton("OK",null).show();
+                    } else if(which==2) {
+                        new AlertDialog.Builder(this).setTitle("Erase local memory?")
+                                .setMessage("Delete all saved notes and question-category counts? "
+                                        + "This cannot be undone.")
+                                .setPositiveButton("Erase",(confirm,button)-> {
+                                    LocalMemoryStore.clear(this);
+                                    LocalSessionContext.clear();
+                                    render();
+                                })
+                                .setNegativeButton("Cancel",null).show();
+                    } else {
+                        boolean next=!prefs.getBoolean("londe_thinking_hum",true);
+                        prefs.edit().putBoolean("londe_thinking_hum",next).apply();
+                        render();
+                    }
+                }).setNegativeButton("Cancel",null).show();
+    }
+
     private void configureWake() {
         boolean enabled = prefs.getBoolean("londe_wake_enabled", false);
         if (!LondeKeywordDetector.available(this)) {
@@ -2233,6 +2294,9 @@ public final class MainActivity extends Activity {
                 : prefs.getBoolean("londe_wake_enabled",false)
                     ? "On · offline keyword spotter" : "Off · tap to enable Hey Londe",
                 () -> configureWake());
+        setting("Wake phrase", prefs.getBoolean("londe_wake_short_enabled",false)
+                ? "Hey Londe or Londe · experimental" : "Hey Londe only · recommended",
+                this::configureWakeKeyword);
         setting("Hey Londe sensitivity",
                 prefs.getBoolean("londe_wake_high_sensitivity",true)
                     ? "High · easier to trigger, may cause false alarms" : "Standard · fewer false alarms",
@@ -2266,6 +2330,16 @@ public final class MainActivity extends Activity {
                 : "Optional · check WhatsApp notifications locally",
                 () -> PhoneAssistantActions.requestNotificationAccess(this));
         section(main, "LOCAL AI", null, null);
+        setting("On-device memory", LocalMemoryStore.status(this),
+                this::configureLocalMemory);
+        setting("Thinking hum", prefs.getBoolean("londe_thinking_hum",true)
+                        ? "On · brief offline hum only if thinking takes longer"
+                        : "Off · quiet while model thinks",
+                () -> {
+                    prefs.edit().putBoolean("londe_thinking_hum",
+                            !prefs.getBoolean("londe_thinking_hum",true)).apply();
+                    render();
+                });
         setting("On-device AI brain · Qwen3", LocalBrainModels.status(this),
                 this::configureLocalBrain);
         setting("Test offline AI", "Ask Londe in airplane mode · watch for OFFLINE QWEN3",

@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 NAME="sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"
 DEST="app/src/main/assets/londe_wake"
 mkdir -p "$DEST"
-if [[ -s "$DEST/encoder.onnx" && -s "$DEST/keywords.txt" && -s "$DEST/tokens.txt" ]]; then
+if [[ -s "$DEST/encoder.onnx" && -s "$DEST/keywords.txt" && -s "$DEST/keywords_short.txt" && -s "$DEST/tokens.txt" ]]; then
   exit 0
 fi
 tmp="$(mktemp -d)"
