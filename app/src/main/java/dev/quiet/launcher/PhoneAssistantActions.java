@@ -27,6 +27,12 @@ final class PhoneAssistantActions {
             case WHATSAPP_NOTIFICATIONS:
             case NOTIFICATIONS:
                 boolean whatsapp=action.kind==PhoneAssistantIntent.Kind.WHATSAPP_NOTIFICATIONS;
+                if (!LondeNotificationListener.includedInBuild(activity)) {
+                    reply.accept("This standard Quiet APK does not include notification access. "
+                            + "Londe can open apps and prepare messages, but it cannot "
+                            + "read WhatsApp or other notifications.");
+                    return true;
+                }
                 if(!LondeNotificationListener.authorized(activity) ||
                         !LondeNotificationListener.connected()) {
                     reply.accept("Notification access is needed to check your phone. "
@@ -59,6 +65,16 @@ final class PhoneAssistantActions {
     }
 
     static void requestNotificationAccess(Activity activity) {
+        if (!LondeNotificationListener.includedInBuild(activity)) {
+            new AlertDialog.Builder(activity)
+                    .setTitle("Notification access not included")
+                    .setMessage("This standard APK excludes Android's privileged notification "
+                            + "listener to address a Google Play Protect restriction for manually "
+                            + "downloaded apps. Other Londe features remain available. "
+                            + "The full edition requires a permitted distribution route.")
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
         new AlertDialog.Builder(activity)
                 .setTitle("Londe notification access")
                 .setMessage("To check WhatsApp messages, enable Quiet in Android Notification Access. "
