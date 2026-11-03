@@ -1730,6 +1730,35 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private String assistantRoleStatus() {
+        if (android.os.Build.VERSION.SDK_INT < 29) return "Android assistant settings";
+        android.app.role.RoleManager roles = getSystemService(android.app.role.RoleManager.class);
+        if (roles == null || !roles.isRoleAvailable(android.app.role.RoleManager.ROLE_ASSISTANT))
+            return "Assistant role unavailable on this phone";
+        return roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)
+                ? "Active · system voice assistant" : "Tap to make Londe your default assistant";
+    }
+
+    private void requestAssistantRole() {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            android.app.role.RoleManager roles =
+                    getSystemService(android.app.role.RoleManager.class);
+            if (roles != null &&
+                    roles.isRoleAvailable(android.app.role.RoleManager.ROLE_ASSISTANT)) {
+                if (roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)) {
+                    Toast.makeText(this, "Londe is already the Android assistant",
+                            Toast.LENGTH_LONG).show();
+                } else {
+                    startSafe(roles.createRequestRoleIntent(
+                            android.app.role.RoleManager.ROLE_ASSISTANT));
+                }
+                return;
+            }
+        }
+        // Manufacturer implementations can omit the role dialog. Don't claim success.
+        startSafe(new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS));
+    }
+
     private void renderSettings() {
         add(main, text("Make it yours.", 34, ink, true), 17);
         add(main, text("No account. No ads. Your phone, your rules.", 14, muted, false), 5);
@@ -1751,6 +1780,10 @@ public final class MainActivity extends Activity {
         section(main, "WORKSPACE", null, null);
         setting("Open in Quiet", "Read, edit and work with shared text and links", this::openWorkspace);
         section(main, "PHONE", null, null);
+        setting("Set Londe as Android assistant",
+                android.os.Build.VERSION.SDK_INT >= 29
+                    ? assistantRoleStatus() : "Open default assistant settings",
+                this::requestAssistantRole);
         setting("Set Quiet as home", "Choose your default Android launcher", () -> startSafe(new Intent(Settings.ACTION_HOME_SETTINGS)));
         setting("Appearance", "Ink · Paper · True black", this::chooseTheme);
         setting("Favourite apps", "Choose up to six essentials", this::editFavorites);
