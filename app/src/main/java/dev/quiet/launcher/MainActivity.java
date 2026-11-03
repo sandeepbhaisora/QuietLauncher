@@ -216,10 +216,15 @@ public final class MainActivity extends Activity {
 
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] grants){
         super.onRequestPermissionsResult(request,permissions,grants);
-        if(request==REQ_WAKE_MIC && grants.length>0 && grants[0]==PackageManager.PERMISSION_GRANTED)
-            {show("home");wakeStatus("WAKE DETECTOR NOT INSTALLED");}
-        else if(request==REQ_WAKE_MIC){
-            prefs.edit().putBoolean("londe_wake_enabled",false).apply();stopWake();
+        if (request == REQ_WAKE_MIC) {
+            if (grants.length > 0 && grants[0] == PackageManager.PERMISSION_GRANTED) {
+                prefs.edit().putBoolean("londe_wake_enabled", true).apply();
+                LondeVoiceService.refreshWake();
+                wakeStatus("HEY LONDE · OFFLINE DETECTOR ENABLED");
+            } else {
+                prefs.edit().putBoolean("londe_wake_enabled", false).apply();
+                LondeVoiceService.refreshWake();
+            }
         }
     }
 
@@ -615,7 +620,8 @@ public final class MainActivity extends Activity {
             dock.addView(aiButton(labels[i],nav[i]),lp);
         }
         add(main,dock,14);
-        add(main,aiText("Hands-free Hey Londe is not enabled yet. Tap SPEAK.",
+        add(main,aiText(prefs.getBoolean("londe_wake_enabled",false)
+                ? "HEY LONDE enabled · say the wake phrase" : "Enable Hey Londe in Settings for voice activation.",
                 11,AI_DIM,false,true),10);
         add(main,aiButton("CLASSIC HOME",()->show("classic")),11);
     }
@@ -754,15 +760,45 @@ public final class MainActivity extends Activity {
         dialog.show();
     }
 
-    private void configureWake(){
-        prefs.edit().putBoolean("londe_wake_enabled",false).apply();
-        stopWake();
-        new AlertDialog.Builder(this)
-            .setTitle("Hey Londe")
-            .setMessage("Automatic Android/Google speech recognition has been disabled. A dedicated offline wake-word engine is required before hands-free voice activation can be safely enabled. You can still open the assistant manually.")
-            .setPositiveButton("OK",null)
-            .show();
+    private void configureWake() {
+        boolean enabled = prefs.getBoolean("londe_wake_enabled", false);
+        if (!LondeKeywordDetector.available(this)) {
+            new AlertDialog.Builder(this).setTitle("Offline wake model missing")
+                    .setMessage("The bundled Hey Londe keyword model was not found in this APK.")
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
+        if (enabled) {
+            new AlertDialog.Builder(this).setTitle("Hey Londe is enabled")
+                    .setMessage("The selected Android assistant listens locally for Hey Londe. Disable it any time here. Android may restrict background microphone access, especially while locked.")
+                    .setPositiveButton("Disable", (d,w)-> {
+                        prefs.edit().putBoolean("londe_wake_enabled", false).apply();
+                        LondeVoiceService.refreshWake();
+                        wakeStatus("VOICE WAKE OFF");
+                        show("settings");
+                    }).setNegativeButton("Keep enabled", null).show();
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("Enable Hey Londe")
+                .setMessage("Use a real local keyword spotting model with microphone access. No full conversations are sent to Google just to detect the wake phrase. Set Londe as your Android default assistant for background operation; Samsung restrictions may still apply. Enabling this can use battery.")
+                .setPositiveButton("Enable", (d,w)-> {
+                    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                        requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_WAKE_MIC);
+                        return;
+                    }
+                    prefs.edit().putBoolean("londe_wake_enabled", true).apply();
+                    LondeVoiceService.refreshWake();
+                    if (android.os.Build.VERSION.SDK_INT >= 29) {
+                        android.app.role.RoleManager roles = getSystemService(android.app.role.RoleManager.class);
+                        if (roles != null && !roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)) {
+                            requestAssistantRole();
+                        }
+                    }
+                    wakeStatus("HEY LONDE · DETECTOR ENABLED");
+                    show("settings");
+                }).setNegativeButton("Cancel", null).show();
     }
+
     private void initHomeVoice(){
         if(londeSpeech!=null){londeSpeech.stop();londeSpeech.shutdown();}
         voiceReady=false;
@@ -916,7 +952,8 @@ public final class MainActivity extends Activity {
         // Android SpeechRecognizer is a transcription engine, not a hotword detector.
         // Never launch it automatically on Home. Re-enable only after adding a
         // dedicated local keyword engine with a verified wake callback.
-        wakeStatus("WAKE DETECTOR NOT INSTALLED");
+        wakeStatus(prefs.getBoolean("londe_wake_enabled", false)
+                ? "HEY LONDE · SYSTEM ASSISTANT LISTENING" : "VOICE WAKE OFF");
     }
     private void homeAsk(String request){
         String q=request==null?"":request.trim();
@@ -1730,6 +1767,35 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private String assistantRoleStatus() {
+        if (android.os.Build.VERSION.SDK_INT < 29) return "Android assistant settings";
+        android.app.role.RoleManager roles = getSystemService(android.app.role.RoleManager.class);
+        if (roles == null || !roles.isRoleAvailable(android.app.role.RoleManager.ROLE_ASSISTANT))
+            return "Assistant role unavailable on this phone";
+        return roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)
+                ? "Active · system voice assistant" : "Tap to make Londe your default assistant";
+    }
+
+    private void requestAssistantRole() {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            android.app.role.RoleManager roles =
+                    getSystemService(android.app.role.RoleManager.class);
+            if (roles != null &&
+                    roles.isRoleAvailable(android.app.role.RoleManager.ROLE_ASSISTANT)) {
+                if (roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)) {
+                    Toast.makeText(this, "Londe is already the Android assistant",
+                            Toast.LENGTH_LONG).show();
+                } else {
+                    startSafe(roles.createRequestRoleIntent(
+                            android.app.role.RoleManager.ROLE_ASSISTANT));
+                }
+                return;
+            }
+        }
+        // Manufacturer implementations can omit the role dialog. Don't claim success.
+        startSafe(new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS));
+    }
+
     private void renderSettings() {
         add(main, text("Make it yours.", 34, ink, true), 17);
         add(main, text("No account. No ads. Your phone, your rules.", 14, muted, false), 5);
@@ -1738,7 +1804,7 @@ public final class MainActivity extends Activity {
         setting("Intent-first home", "Default home · local commands and recommendations", () -> show("home"));
         section(main, "LONDE ASSISTANT", null, null);
         setting("Voice wake: Hey Londe", prefs.getBoolean("londe_wake_enabled",false)
-            ? "Unavailable until offline detector is installed" : "Off · full speech detection disabled",
+            ? "On · offline keyword spotter" : "Off · enable local Hey Londe detector",
             () -> configureWake());
         setting("Londe voice engine", "Choose offline voice · free neural TTS option", this::configureLondeVoice);
         setting("Londe assistant", "Voice-first assistant · answers and device commands", this::openLonde);
@@ -1751,6 +1817,10 @@ public final class MainActivity extends Activity {
         section(main, "WORKSPACE", null, null);
         setting("Open in Quiet", "Read, edit and work with shared text and links", this::openWorkspace);
         section(main, "PHONE", null, null);
+        setting("Set Londe as Android assistant",
+                android.os.Build.VERSION.SDK_INT >= 29
+                    ? assistantRoleStatus() : "Open default assistant settings",
+                this::requestAssistantRole);
         setting("Set Quiet as home", "Choose your default Android launcher", () -> startSafe(new Intent(Settings.ACTION_HOME_SETTINGS)));
         setting("Appearance", "Ink · Paper · True black", this::chooseTheme);
         setting("Favourite apps", "Choose up to six essentials", this::editFavorites);

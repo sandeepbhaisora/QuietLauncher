@@ -6,3 +6,6 @@ app/src/main/assets/quiet_voice/
 .gradle/
 **/build/
 local.properties
+
+# Downloaded offline keyword spotter artifacts
+app/src/main/assets/londe_wake/

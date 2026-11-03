@@ -59,6 +59,7 @@ public final class LondeActivity extends Activity {
     private int requestGeneration = 0;
     private String model = "";
     private String currentAnswer = "";
+    private Runnable pendingVoiceNavigation;
     private EditText keyboard;
     private TextView answer, caption, status, lastRequest, microphone, speaker, keyboardToggle;
     private LinearLayout keyboardPanel, actionRow;
@@ -103,6 +104,8 @@ public final class LondeActivity extends Activity {
         }
 
         initSpeech();
+        if (getIntent() != null && Intent.ACTION_ASSIST.equals(getIntent().getAction()))
+            getIntent().putExtra("auto_listen", true);
         if (getIntent() != null && getIntent().getBooleanExtra("auto_listen", false))
             ui.postDelayed(this::listen, 450);
     }
@@ -397,6 +400,12 @@ public final class LondeActivity extends Activity {
     }
     private void voiceFinished(){
         if(!inForeground||isFinishing())return;
+        if (pendingVoiceNavigation != null) {
+            Runnable next = pendingVoiceNavigation;
+            pendingVoiceNavigation = null;
+            next.run();
+            return;
+        }
         if(activeSession&&!busy){
             setPhase(Phase.READY,"YOUR TURN");
             ui.postDelayed(()->{if(activeSession&&!busy&&inForeground)startRecognition();},550);
@@ -474,6 +483,16 @@ public final class LondeActivity extends Activity {
         if(q.isEmpty())return;
         if(q.length()>1500){localAnswer("Input","Please keep requests under 1500 characters.");return;}
         lastRequest.setText("YOU  /  "+q);
+        String simple = q.toLowerCase(Locale.ROOT).trim().replaceAll("[.!?।]+$", "");
+        if (simple.matches("(?:hey londe[, ]+)?(?:stop londe|stop listening|go to sleep|बस कर|बंद हो जा|सो जा|chup ho ja|londe bas|londe stop)")) {
+            activeSession = false;
+            if (recognizer != null) { recognizer.cancel(); recognizerRunning = false; }
+            setPhase(Phase.READY, "GOING TO SLEEP");
+            showAnswer("Okay. Say Hey Londe when you need me.");
+            say("ठीक है भाई, फिर बुला लेना।");
+            ui.postDelayed(this::finish, 2400);
+            return;
+        }
         LocalFirstRouter.Decision routing = LocalFirstRouter.route(q);
         if (routing.kind == LocalFirstRouter.Kind.LOCAL_ANSWER) {
             long focusUntil = getSharedPreferences("quiet_local_v1", MODE_PRIVATE)
@@ -483,9 +502,24 @@ public final class LondeActivity extends Activity {
             return;
         }
         if (routing.kind == LocalFirstRouter.Kind.LOCAL_ACTION) {
+            LondeDeviceActions.Result executed =
+                    LondeDeviceActions.execute(this, routing.action);
+            if (executed.handled) {
+                if (executed.navigation != null) {
+                    Intent destination = executed.navigation;
+                    activeSession = false;
+                    pendingVoiceNavigation = () -> {
+                        try { startActivity(destination); }
+                        catch (Exception error) { toast("Unable to launch requested app"); }
+                        finish();
+                    };
+                }
+                localAnswer(q, executed.spoken);
+                return;
+            }
             setPhase(Phase.ACTION, "ACTION TO REVIEW");
-            showAnswer("I can help with that. Quiet will show you the action before anything runs.");
-            say("I can do that. Please review the action.");
+            showAnswer("That action needs review in Quiet before it can run.");
+            say("I'll show the action for review.");
             ui.postDelayed(() -> handoff(routing.action), 550);
             return;
         }
@@ -550,6 +584,7 @@ public final class LondeActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        LondeVoiceService.rearmWake();
         requestGeneration++;
         work.shutdownNow();
         ui.removeCallbacksAndMessages(null);
