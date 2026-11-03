@@ -460,6 +460,19 @@ public final class LondeActivity extends Activity {
         Intent i=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN");
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            // Where the recognizer supports it, understand both Hindi and
+            // Indian English in the same hands-free voice session.
+            i.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_DETECTION, true);
+            i.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH,
+                    RecognizerIntent.LANGUAGE_SWITCH_BALANCED);
+            ArrayList<String> languages = new ArrayList<>();
+            languages.add("hi-IN");
+            languages.add("en-IN");
+            i.putStringArrayListExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES, languages);
+        }
         try{recognizerRunning=true;recognizer.startListening(i);}
         catch(Exception e){recognizerRunning=false;activeSession=false;setPhase(Phase.READY,"MIC UNAVAILABLE");}
     }
