@@ -39,6 +39,7 @@ public final class LondeVoiceService extends VoiceInteractionService {
                 && isActiveService(this, new ComponentName(this, LondeVoiceService.class))
                 && getSharedPreferences("quiet_local_v1", MODE_PRIVATE)
                        .getBoolean("londe_wake_enabled", false)
+                && LondeKeywordDetector.available(this)
                 && checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                        == PackageManager.PERMISSION_GRANTED;
     }
