@@ -24,6 +24,19 @@ final class LocalReplyPolicy {
         if (text.length() < 3 || text.length() > 900) return false;
         if (requiresLiveInformation(question)) return false;
         String lower = text.toLowerCase(Locale.ROOT);
+        String q = question == null ? "" : question.toLowerCase(Locale.ROOT);
+        // An unrelated canned greeting/date isn't a successful local answer.
+        if (lower.matches("(?s)^(hello|hi|hey)[!,. ]*(?:i am |i'm )?(?:londe|an ai assistant)?[!,. ]*"
+                + "(?:how (?:can|may) i (?:help|assist) you|what can i do for you).*$")
+                || lower.matches("(?s)^(?:how can i (?:help|assist) you|what can i do for you)[?.! ]*$"))
+            return false;
+        boolean askedForDate = q.matches("(?s).*(?:\\bdate\\b|\\bday\\b|\\btoday's date\\b|"
+                + "कौन सा दिन|आज की तारीख).*");
+        if (!askedForDate && lower.matches("(?s)^(?:yes,? )?(?:today is |it's |it is )?"
+                + "(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+                + "[, .]+.*(?:20[2-9][0-9]).*"))
+            return false;
+        if (CalendarIntent.isPersonalSchedule(question)) return false;
         if (lower.contains("<think") || lower.contains("</think>")
                 || lower.startsWith("{\"type\"")) return false;
         if ((lower.contains("openai") || lower.contains("chatgpt"))
