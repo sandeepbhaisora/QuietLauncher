@@ -128,9 +128,6 @@ jobs:
           echo "Only native runtime and small wake token metadata will be packaged."
       - name: Assemble installable debug APK
         run: gradle --no-daemon :app:assembleDebug
-      - name: Delete temporary keystore
-        if: always()
-        run: rm -rf "$RUNNER_TEMP/quiet-signing"
       - name: Upload full-feature APK (notification access requires trusted distribution)
         uses: actions/upload-artifact@v4
         with:
@@ -154,3 +151,7 @@ jobs:
         with:
           name: Quiet-standard-apk
           path: ${{ runner.temp }}/quiet-standard/Quiet-standard.apk
+
+      - name: Delete temporary keystore
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/quiet-signing"
