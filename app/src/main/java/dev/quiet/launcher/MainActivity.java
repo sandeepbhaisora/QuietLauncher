@@ -1059,6 +1059,12 @@ public final class MainActivity extends Activity {
                                 // The assistant owns transcription after keyword detection.
                                 openLonde();
                             }
+                            @Override public void onAudioLevel(int percent) {
+                                // PCM capture may be active even if the keyword is not
+                                // recognized. A live level makes this distinction visible.
+                                if(homeWake!=null && !isFinishing())
+                                    wakeStatus("HEY LONDE · MIC " + percent + "% · SAY WAKE PHRASE");
+                            }
                             @Override public void onError(String reason) {
                                 homeWake=null;
                                 android.util.Log.w("QuietWake",reason);
