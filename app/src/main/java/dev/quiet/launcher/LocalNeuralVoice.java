@@ -220,9 +220,15 @@ final class LocalNeuralVoice {
     void close() {
         closed = true;
         stop();
-        worker.shutdownNow();
-        // JNI is serialized with model generation, so release on the same executor.
-        // A subsequent activity instance uses its own model object.
+        // Run JNI cleanup after any currently executing synthesis. Never release
+        // an OfflineTts object concurrently with its native generate() call.
+        worker.execute(() -> {
+            if (tts != null) {
+                try { tts.release(); } catch (Exception ignored) { }
+                tts = null;
+            }
+        });
+        worker.shutdown();
     }
 
     private void deliver(Listener listener, boolean success, String error) {
