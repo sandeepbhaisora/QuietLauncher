@@ -2033,9 +2033,11 @@ public final class MainActivity extends Activity {
         setting("Download Hey Londe detector",
                 OptionalModelPacks.status(this,OptionalModelPacks.Pack.WAKE),
                 () -> manageOptionalPack(OptionalModelPacks.Pack.WAKE));
-        setting("Voice wake: Hey Londe", prefs.getBoolean("londe_wake_enabled",false)
-            ? "On · offline keyword spotter" : "Off · enable local Hey Londe detector",
-            () -> configureWake());
+        setting("Voice wake: Hey Londe",
+                !LondeKeywordDetector.available(this) ? "Install wake model first"
+                : prefs.getBoolean("londe_wake_enabled",false)
+                    ? "On · offline keyword spotter" : "Off · tap to enable Hey Londe",
+                () -> configureWake());
         setting("Test Hey Londe detector", "Foreground test · shows model and mic errors",
             () -> {
                 Intent diagnostic = new Intent(this, LondeActivity.class);
