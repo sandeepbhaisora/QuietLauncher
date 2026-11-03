@@ -77,5 +77,4 @@ final class PhoneAssistantIntent {
         }
         return new PhoneAssistantIntent(kind, body, recipient);
     }
-    private PhoneAssistantIntent() {}
 }
