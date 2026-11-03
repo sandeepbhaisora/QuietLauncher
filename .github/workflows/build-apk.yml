@@ -53,6 +53,14 @@ jobs:
             app/src/main/java/dev/quiet/launcher/HindiSpeech.java \
             app/src/test/java/dev/quiet/launcher/HindiSpeechTest.java
           java -cp /tmp/quiet-hindi-tests dev.quiet.launcher.HindiSpeechTest
+      - name: Test offline-first routing (JVM)
+        run: |
+          mkdir -p /tmp/quiet-routing-tests
+          javac -encoding UTF-8 -d /tmp/quiet-routing-tests \
+            app/src/main/java/dev/quiet/launcher/LondeCommands.java \
+            app/src/main/java/dev/quiet/launcher/LocalFirstRouter.java \
+            app/src/test/java/dev/quiet/launcher/LocalFirstRouterTest.java
+          java -cp /tmp/quiet-routing-tests dev.quiet.launcher.LocalFirstRouterTest
       # Never expose a persistent signing key to pull requests.
       - name: Prepare permanent signing for main builds
         if: github.event_name != 'pull_request'
@@ -78,6 +86,8 @@ jobs:
           echo "QUIET_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
       - name: Set increasing build version
         run: echo "QUIET_VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+      - name: Install native offline Hindi neural voice runtime and model
+        run: bash scripts/install_local_voice.sh
       - name: Assemble installable debug APK
         run: gradle --no-daemon :app:assembleDebug
       - name: Delete temporary keystore

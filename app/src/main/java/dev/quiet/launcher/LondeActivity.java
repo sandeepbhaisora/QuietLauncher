@@ -50,6 +50,7 @@ public final class LondeActivity extends Activity {
     private final ExecutorService work = Executors.newSingleThreadExecutor();
     private final List<LondeClient.Turn> memory = new ArrayList<>();
     private TextToSpeech speech;
+    private LocalNeuralVoice neuralVoice;
     private SpeechRecognizer recognizer;
     private boolean activeSession, recognizerRunning, inForeground=true;
     private String selectedEngine="";
@@ -91,6 +92,7 @@ public final class LondeActivity extends Activity {
                 | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
         createConsole();
         selectedEngine=getSharedPreferences("londe_voice_v1",MODE_PRIVATE).getString("tts_engine","");
+        neuralVoice = new LocalNeuralVoice(this);
         initSpeech();
         if (getIntent() != null && getIntent().getBooleanExtra("auto_listen", false))
             ui.postDelayed(this::listen, 450);
@@ -120,29 +122,26 @@ public final class LondeActivity extends Activity {
             new TextToSpeech(this,listener,selectedEngine);
     }
 
+    private boolean useLocalVoice() {
+        return "neural".equals(getSharedPreferences("londe_voice_v1", MODE_PRIVATE)
+                .getString("voice_mode", "neural"));
+    }
     private void voiceSettings(){
-        if(speech==null||!speechReady){toast("Voice engine is initializing");return;}
-        java.util.List<String> labels=new java.util.ArrayList<>();
-        java.util.List<String> ids=new java.util.ArrayList<>();
-        labels.add("Choose installed voice");ids.add("voices");
-        labels.add("Change speech engine");ids.add("engine");
-        labels.add("Install free offline neural voices (Marmalade)");ids.add("install");
-        labels.add("Configure Android voice settings");ids.add("settings");
-        new AlertDialog.Builder(this).setTitle("Londe voice")
-            .setItems(labels.toArray(new String[0]),(d,w)->{
-                if(w==0)pickVoice();
-                else if(w==1)pickEngine();
-                else if(w==2){
-                    try {
-                        Intent install=new Intent(Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://f-droid.org/packages/app.marmalade.tts/"));
-                        startActivity(install);
-                    }catch(Exception e){toast("Open f-droid.org/packages/app.marmalade.tts/");}
-                } else {
-                    try{startActivity(new Intent("com.android.settings.TTS_SETTINGS"));}
-                    catch(Exception e){toast("Open Settings > Text-to-speech output");}
-                }
-            }).setNegativeButton("Cancel",null).show();
+        new AlertDialog.Builder(this).setTitle("Londe speech")
+            .setMessage("Quiet now includes offline Supertonic 3 neural synthesis. No API calls are needed to speak. Choose Android TTS only if needed.")
+            .setPositiveButton("Offline neural (default)", (d,w) -> {
+                getSharedPreferences("londe_voice_v1", MODE_PRIVATE).edit()
+                        .putString("voice_mode","neural").apply();
+                toast(LocalNeuralVoice.modelPackaged(this)
+                        ? "Offline voice active. Testing Hindi..." : "Voice model missing from this APK.");
+                say("नमस्ते भाई, मैं लोंडे हूँ। बताओ क्या करना है?");
+            })
+            .setNeutralButton("Android fallback", (d,w) -> {
+                getSharedPreferences("londe_voice_v1", MODE_PRIVATE).edit()
+                        .putString("voice_mode","android").apply();
+                pickEngine();
+            })
+            .setNegativeButton("Cancel", null).show();
     }
     private void pickEngine(){
         java.util.List<TextToSpeech.EngineInfo> engines=speech.getEngines();
@@ -329,10 +328,30 @@ public final class LondeActivity extends Activity {
         orb.invalidate();
     }
     private void say(String value) {
-        if (!readAloud || !speechReady) return;
-        String spoken=HindiSpeech.prepare(value.length()>750 ? value.substring(0,750)+"…" : value,
-                speech.getVoice()!=null?speech.getVoice().getLocale():java.util.Locale.getDefault());
-        speech.speak(spoken,TextToSpeech.QUEUE_FLUSH,null,"londe-"+SystemClock.uptimeMillis());
+        if (!readAloud) return;
+        String shortened = value.length()>750 ? value.substring(0,750)+"…" : value;
+        if (useLocalVoice()) {
+            neuralVoice.speak(shortened, (success,error) -> {
+                if (!success) {
+                    status.setText("LOCAL VOICE ERROR");
+                    toast(error == null ? "Local voice unavailable" : error);
+                }
+                voiceFinished();
+            });
+            return;
+        }
+        if (!speechReady || speech == null) {
+            voiceFinished();
+            return;
+        }
+        String spoken = HindiSpeech.prepare(shortened,
+                speech.getVoice()!=null ? speech.getVoice().getLocale() : Locale.getDefault());
+        int result=speech.speak(spoken, TextToSpeech.QUEUE_FLUSH, null,
+                "londe-"+SystemClock.uptimeMillis());
+        if(result==TextToSpeech.ERROR)voiceFinished();
+    }
+    private boolean canSpeak() {
+        return readAloud && (useLocalVoice() || speechReady);
     }
     private void showAnswer(String result) {
         currentAnswer=result;
@@ -344,7 +363,7 @@ public final class LondeActivity extends Activity {
         showAnswer(response);
         setPhase(Phase.SPEAKING,"DONE");
         say(response);
-        if(!readAloud||!speechReady)voiceFinished();
+        if(!canSpeak())voiceFinished();
     }
     private void submitKeyboard() {
         String input=keyboard.getText().toString().trim();
@@ -365,6 +384,7 @@ public final class LondeActivity extends Activity {
         readAloud=!readAloud;
         speaker.setText(readAloud?"◖))  ON":"◖))  OFF");
         if(!readAloud && speech!=null)speech.stop();
+        if(!readAloud && neuralVoice!=null)neuralVoice.stop();
     }
     private void voiceFinished(){
         if(!inForeground||isFinishing())return;
@@ -378,6 +398,7 @@ public final class LondeActivity extends Activity {
             activeSession=false;
             if(recognizer!=null){recognizer.cancel();recognizerRunning=false;}
             if(speech!=null)speech.stop();
+            if(neuralVoice!=null)neuralVoice.stop();
             setPhase(Phase.READY,"SESSION STOPPED");return;
         }
         if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
@@ -444,24 +465,19 @@ public final class LondeActivity extends Activity {
         if(q.isEmpty())return;
         if(q.length()>1500){localAnswer("Input","Please keep requests under 1500 characters.");return;}
         lastRequest.setText("YOU  /  "+q);
-        String normalized=q.toLowerCase(Locale.ROOT).replace('’','\'');
-        if(normalized.matches(".*\\b(what(?:'s| is)?|tell me|current|now)\\b.*\\btime\\b.*")
-                || normalized.matches(".*\\btime (?:right )?now\\b.*")) {
-            localAnswer(q,"It's "+new SimpleDateFormat("h:mm a",Locale.getDefault())
-                    .format(new Date())+".");
+        LocalFirstRouter.Decision routing = LocalFirstRouter.route(q);
+        if (routing.kind == LocalFirstRouter.Kind.LOCAL_ANSWER) {
+            long focusUntil = getSharedPreferences("quiet_local_v1", MODE_PRIVATE)
+                    .getLong("focusUntil", 0L);
+            localAnswer(q, LocalFirstRouter.localAnswer(routing,
+                    System.currentTimeMillis(), focusUntil, Locale.getDefault()));
             return;
         }
-        if(normalized.matches(".*\\b(what(?:'s| is)?|today's|which)\\b.*\\b(date|day)\\b.*")) {
-            localAnswer(q,"Today is "+new SimpleDateFormat("EEEE, d MMMM yyyy",
-                Locale.getDefault()).format(new Date())+".");
-            return;
-        }
-        String action=LondeCommands.normalize(q);
-        if(action!=null) {
-            setPhase(Phase.ACTION,"ACTION TO REVIEW");
+        if (routing.kind == LocalFirstRouter.Kind.LOCAL_ACTION) {
+            setPhase(Phase.ACTION, "ACTION TO REVIEW");
             showAnswer("I can help with that. Quiet will show you the action before anything runs.");
             say("I can do that. Please review the action.");
-            ui.postDelayed(()->handoff(action),550);
+            ui.postDelayed(() -> handoff(routing.action), 550);
             return;
         }
         if(!ChatGptAuth.canUsePlan(this)){
@@ -489,7 +505,7 @@ public final class LondeActivity extends Activity {
                     busy=false;
                     setPhase(Phase.SPEAKING,"REPLY READY");
                     say(result.text);
-                    if(!readAloud||!speechReady)voiceFinished();
+                    if(!canSpeak())voiceFinished();
                 });
             }catch(Exception ex){
                 ui.post(()->{
@@ -530,6 +546,7 @@ public final class LondeActivity extends Activity {
         ui.removeCallbacksAndMessages(null);
         activeSession=false;
         if(recognizer!=null)recognizer.destroy();
+        if(neuralVoice!=null)neuralVoice.close();
         if(speech!=null){speech.stop();speech.shutdown();}
         super.onDestroy();
     }

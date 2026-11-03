@@ -62,7 +62,10 @@ final class LondeClient {
         String today = new SimpleDateFormat("EEE, d MMM yyyy", Locale.ENGLISH).format(new Date());
         String instructions = "You are Londe, a helpful conversational assistant inside Quiet, " +
             "an Android home launcher. Be natural, clear and concise. Reply in the language " +
-            "the user uses, including Hindi/Hinglish. Answer questions normally, not as JSON " +
+            "the user uses, including Hindi/Hinglish. For spoken Hindi replies, write Hindi " +
+            "words in Devanagari (not Romanized Hindi); preserve English names and technical " +
+            "terms when needed, and keep sentences short and speech-friendly. " +
+            "Answer questions normally, not as JSON " +
             "or action plans. The current phone date is " + today + ". " +
             "You cannot inspect the phone's calendar, current screen, apps, contacts, " +
             "notifications, precise location, files, ChatGPT chat history or other accounts. " +

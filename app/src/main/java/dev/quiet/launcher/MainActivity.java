@@ -117,6 +117,7 @@ public final class MainActivity extends Activity {
     private TextView londeStatus, londeReply;
     private QuietFace assistantFace;
     private TextToSpeech londeSpeech;
+    private LocalNeuralVoice neuralVoice;
     private boolean voiceReady, replyBusy;
     private String recentReply="Say Hey Londe to ask or command.";
     private String wakeState="VOICE WAKE OFF";
@@ -150,6 +151,7 @@ public final class MainActivity extends Activity {
         widgetManager = AppWidgetManager.getInstance(this);
         widgetHost = new AppWidgetHost(this, WIDGET_HOST_ID);
         setPalette();
+        neuralVoice = new LocalNeuralVoice(this);
         initHomeVoice();
         /*londeSpeech=new TextToSpeech(this,code->{
             voiceReady=code==TextToSpeech.SUCCESS;
@@ -220,6 +222,7 @@ public final class MainActivity extends Activity {
     @Override protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
         stopWake();
+        if(neuralVoice!=null)neuralVoice.close();
         if(londeSpeech!=null){londeSpeech.stop();londeSpeech.shutdown();}
         background.shutdownNow();
         super.onDestroy();
@@ -253,6 +256,7 @@ public final class MainActivity extends Activity {
         foregroundHome=false;
         stopWake();
         if(londeSpeech!=null)londeSpeech.stop();
+        if(neuralVoice!=null)neuralVoice.stop();
         londeSpeaking=false;
         ChatGptAuth.onLauncherPaused();
         super.onPause();
@@ -773,14 +777,51 @@ public final class MainActivity extends Activity {
         londeSpeech=engine.isEmpty()?new TextToSpeech(this,callback):
             new TextToSpeech(this,callback,engine);
     }
+    private boolean useLocalNeuralVoice() {
+        return "neural".equals(getSharedPreferences("londe_voice_v1", MODE_PRIVATE)
+                .getString("voice_mode", "neural"));
+    }
+    private void setVoiceMode(boolean neural) {
+        getSharedPreferences("londe_voice_v1", MODE_PRIVATE).edit()
+                .putString("voice_mode", neural ? "neural" : "android").apply();
+    }
+    private void speakLonde(String message, String utteranceId) {
+        String text = message == null ? "" : message;
+        if (useLocalNeuralVoice()) {
+            londeSpeaking = true;
+            neuralVoice.speak(text, (success, error) -> {
+                if (!success) {
+                    wakeStatus(error == null ? "OFFLINE VOICE FAILED" : error);
+                    Toast.makeText(this, "Local voice unavailable; choose Android fallback in voice settings",
+                            Toast.LENGTH_LONG).show();
+                }
+                voiceCompleted(utteranceId);
+            });
+        } else if (voiceReady && londeSpeech != null) {
+            londeSpeaking = true;
+            java.util.Locale locale = londeSpeech.getVoice() != null
+                    ? londeSpeech.getVoice().getLocale() : Locale.getDefault();
+            int started = londeSpeech.speak(HindiSpeech.prepare(text, locale),
+                    TextToSpeech.QUEUE_FLUSH, null, utteranceId);
+            if (started == TextToSpeech.ERROR) voiceCompleted(utteranceId);
+        } else {
+            wakeStatus("ANDROID SPEECH NOT READY");
+            voiceCompleted(utteranceId);
+        }
+    }
     private void configureLondeVoice(){
-        new AlertDialog.Builder(this).setTitle("Londe voice")
-            .setMessage("Quiet can use any installed Android text-to-speech engine. For a free offline neural voice, install Marmalade TTS, download a voice inside Marmalade, then select it here. No API key is needed.")
-            .setPositiveButton("Install Marmalade",(d,w)->startSafe(
-                new Intent(Intent.ACTION_VIEW,Uri.parse(
-                    "https://f-droid.org/packages/app.marmalade.tts/"))))
-            .setNeutralButton("Select engine",(d,w)->selectLondeEngine())
-            .setNegativeButton("Cancel",null).show();
+        new AlertDialog.Builder(this).setTitle("Londe speech output")
+            .setMessage("Offline Supertonic 3 neural voice runs inside Quiet on your phone, no API key. Android voice is an optional fallback. First synthesis loads the model.")
+            .setPositiveButton("Use offline neural voice", (d,w) -> {
+                setVoiceMode(true);
+                Toast.makeText(this, LocalNeuralVoice.modelPackaged(this)
+                        ? "Offline neural voice selected" : "Neural model assets missing from APK", Toast.LENGTH_LONG).show();
+            })
+            .setNeutralButton("Use Android voice", (d,w) -> {
+                setVoiceMode(false);
+                selectLondeEngine();
+            })
+            .setNegativeButton("Cancel", null).show();
     }
     private void selectLondeEngine(){
         if(londeSpeech==null||!voiceReady){
@@ -844,19 +885,7 @@ public final class MainActivity extends Activity {
         wakeStatus("HEY LONDE DETECTED · SPEAK AFTER MY REPLY");
         recentReply="Londe: Haan, bolo! I'm listening for your question.";
         if(londeReply!=null)londeReply.setText(recentReply);
-        if(voiceReady && londeSpeech!=null){
-            londeSpeaking=true;
-            int result=londeSpeech.speak("Haan, bolo.",TextToSpeech.QUEUE_FLUSH,null,
-                "londe-wake-"+SystemClock.uptimeMillis());
-            if(result==TextToSpeech.ERROR){
-                londeSpeaking=false;
-                handler.postDelayed(()->{
-                    if(homeWake!=null)homeWake.resumeAfterAcknowledgement();
-                },600);
-            }
-        }else handler.postDelayed(()->{
-            if(homeWake!=null)homeWake.resumeAfterAcknowledgement();
-        },500);
+        speakLonde("हाँ भाई, बोलो।", "londe-wake-"+SystemClock.uptimeMillis());
     }
     private void updateWakeHeard(String heard, boolean completed){
         if(heard==null||heard.trim().isEmpty())return;
@@ -886,7 +915,20 @@ public final class MainActivity extends Activity {
         if(replyBusy){wakeStatus("BUSY · TRY AGAIN");return;}
         stopWake();
         if(q.length()>700){wakeStatus("REQUEST TOO LONG");return;}
-        String action=LondeCommands.normalize(q);
+        LocalFirstRouter.Decision routing = LocalFirstRouter.route(q);
+        if (routing.kind == LocalFirstRouter.Kind.LOCAL_ANSWER) {
+            String response = LocalFirstRouter.localAnswer(routing,
+                    System.currentTimeMillis(),
+                    prefs.getLong("focusUntil", 0L), Locale.getDefault());
+            recentReply = "You: " + q + "\\n\\nLonde: " + response;
+            if (londeReply != null) londeReply.setText(recentReply);
+            wakeStatus("ANSWERED OFFLINE");
+            if ("response".equals(aiScene) && "home".equals(page)) render();
+            speakLonde(response, "londe-local-" + SystemClock.uptimeMillis());
+            return;
+        }
+        String action = routing.kind == LocalFirstRouter.Kind.LOCAL_ACTION
+                ? routing.action : null;
         if(action!=null){
             recentReply="You asked: "+q+"\\nReview before running.";
             if(londeReply!=null)londeReply.setText(recentReply);
@@ -919,17 +961,8 @@ public final class MainActivity extends Activity {
                     if(londeReply!=null)londeReply.setText(recentReply);
                     wakeStatus("LONDE REPLIED");
                     if ("response".equals(aiScene) && "home".equals(page)) render();
-                    if(voiceReady && londeSpeech!=null){
-                        londeSpeaking=true;
-                        int started=londeSpeech.speak(
-                            HindiSpeech.prepare(result.text.length()>600?result.text.substring(0,600):result.text,
-                                londeSpeech.getVoice()!=null?londeSpeech.getVoice().getLocale():Locale.getDefault()),
-                            TextToSpeech.QUEUE_FLUSH,null,"londe-answer-"+SystemClock.uptimeMillis());
-                        if(started==TextToSpeech.ERROR){
-                            londeSpeaking=false;
-                            handler.postDelayed(this::startWakeIfAllowed,700);
-                        }
-                    } else handler.postDelayed(this::startWakeIfAllowed,700);
+                    speakLonde(result.text.length()>600 ? result.text.substring(0,600) : result.text,
+                            "londe-answer-"+SystemClock.uptimeMillis());
                 });
             }catch(Exception e){
                 handler.post(()->{
