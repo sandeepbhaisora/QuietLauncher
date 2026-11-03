@@ -59,4 +59,5 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.0.21")
     // Free, actual on-device llama.cpp inference with GGUF. No API/keys.
     implementation("dev.ffmpegkit-maintained:llama-android:0.1.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }
