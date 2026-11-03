@@ -694,12 +694,13 @@ public final class LondeActivity extends Activity {
     @Override protected void onPause(){
         stopWakeDiagnostic();
         inForeground=false;
+        LondeVoiceService.foregroundOwner(false, false);
         if(recognizer!=null){recognizer.cancel();recognizerRunning=false;}
         super.onPause();
     }
     @Override protected void onResume(){
         super.onResume();inForeground=true;
-        LondeVoiceService.pauseWakeForSession();
+        LondeVoiceService.foregroundOwner(false, true);
         if(activeSession&&!busy)ui.postDelayed(()->startRecognition(),550);
     }
 
@@ -921,7 +922,7 @@ public final class LondeActivity extends Activity {
 
     @Override protected void onDestroy() {
         stopWakeDiagnostic();
-        LondeVoiceService.rearmWake();
+        LondeVoiceService.foregroundOwner(false, false);
         requestGeneration++;
         work.shutdownNow();
         ui.removeCallbacksAndMessages(null);
