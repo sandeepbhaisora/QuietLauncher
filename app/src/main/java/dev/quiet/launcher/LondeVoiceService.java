@@ -27,6 +27,7 @@ public final class LondeVoiceService extends VoiceInteractionService {
     private int generation;
     private boolean destroyed;
     private volatile boolean conversationOwnsMic;
+    private int microphoneLeaseVersion;
 
     @Override public void onReady() {
         super.onReady();
@@ -109,6 +110,8 @@ public final class LondeVoiceService extends VoiceInteractionService {
     static void pauseWakeForSession() {
         LondeVoiceService instance = current.get();
         if (instance != null) instance.ui.post(() -> {
+            // Invalidate a rearm that a previous Activity already scheduled.
+            ++instance.microphoneLeaseVersion;
             instance.conversationOwnsMic = true;
             instance.stopWake();
         });
@@ -116,10 +119,17 @@ public final class LondeVoiceService extends VoiceInteractionService {
 
     static void rearmWake() {
         LondeVoiceService instance = current.get();
-        if (instance != null) instance.ui.postDelayed(() -> {
-            instance.conversationOwnsMic = false;
-            instance.startWakeIfAllowed();
-        }, 900);
+        if (instance != null) instance.ui.post(() -> {
+            final int lease = instance.microphoneLeaseVersion;
+            instance.ui.postDelayed(() -> {
+                // Home.onPause can run before Londe.onResume; a delayed Home
+                // rearm must NOT steal Londe's recognizer microphone.
+                if (instance.destroyed || lease != instance.microphoneLeaseVersion)
+                    return;
+                instance.conversationOwnsMic = false;
+                instance.startWakeIfAllowed();
+            }, 900);
+        });
     }
 
     @Override public void onShutdown() {

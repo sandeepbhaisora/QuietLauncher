@@ -137,22 +137,28 @@ final class LocalNeuralVoice {
                 ensureReady();
                 if (closed || request != sequence.get()) return;
 
-                boolean hindi = HindiSpeech.containsDevanagari(clean)
-                        || clean.matches("(?i)(?s).*\\b(haan|bhai|bolo|theek hai|shukriya)\\b.*");
-                String spoken = hindi ? HindiSpeech.prepare(clean, Locale.forLanguageTag("hi-IN")) : clean;
-                GenerationConfig config = new GenerationConfig();
-                config.setSid(6);
-                config.setSpeed(1.0f);
-                config.setNumSteps(5);
-                Map<String, String> extra = new HashMap<>();
-                extra.put("lang", hindi ? "hi" : "en");
-                config.setExtra(extra);
+                SharedPreferences preferences =
+                        context.getSharedPreferences(PREF, Context.MODE_PRIVATE);
+                int speakerId = Math.max(0, Math.min(9,
+                        preferences.getInt("neural_speaker_id", 6)));
+                int steps = preferences.getBoolean("neural_high_quality", true) ? 8 : 5;
 
-                for (String part : chunks(spoken)) {
+                // Choose language for each segment. A single mixed-language response
+                // should not lock every sentence into English or Hindi.
+                for (String part : chunks(clean)) {
                     if (closed || request != sequence.get()) return;
+                    boolean hindi = HindiSpeech.shouldSpeakHindi(part);
+                    String spoken = HindiSpeech.prepare(part, HindiSpeech.languageFor(part));
+                    GenerationConfig config = new GenerationConfig();
+                    config.setSid(speakerId);
+                    config.setSpeed(1.0f);
+                    config.setNumSteps(steps);
+                    Map<String, String> extra = new HashMap<>();
+                    extra.put("lang", hindi ? "hi" : "en");
+                    config.setExtra(extra);
                     long started = android.os.SystemClock.elapsedRealtime();
                     // No JNI callback: callback API is implicated in Android crashes.
-                    GeneratedAudio audio = tts.generateWithConfig(part, config);
+                    GeneratedAudio audio = tts.generateWithConfig(spoken, config);
                     Log.i(TAG, "Native synthesis segment took " +
                             (android.os.SystemClock.elapsedRealtime() - started) + " ms");
                     if (closed || request != sequence.get()) return;

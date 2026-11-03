@@ -88,11 +88,22 @@ object LocalBrain {
                         User: What is a race condition? -> A race condition occurs when timing affects the outcome of concurrent operations.
                         User: Do I have any meetings today? -> [FALLBACK]
                     """.trimIndent()
-                    // Avoid injecting a canned fake date or other stale assistant
-                    // messages into the tiny model's response context.
-                    val fullQuestion = "Answer this exact new request, not any earlier request:\n" +
+                    // The tiny model often copies old answers. Include previous turns
+                    // only for explicit follow-up questions that actually need context.
+                    val followUp = Regex(
+                        "(?i)^\\s*(?:and\\b|what about\\b|how about\\b|also\\b|" +
+                        "then\\b|aur\\b|iska\\b|uska\\b|iske\\b|uske\\b|wo\\b|ye\\b)"
+                    ).containsMatchIn(question)
+                    val history = if (followUp) recentContext.replace("\\n", "\n").takeLast(550) else ""
+                    val fullQuestion = if (history.isEmpty()) {
+                        "Answer this exact new request, not any earlier request:\n" +
                             question.take(750) + "\n/no_think"
-                    Llama.complete(model!!, fullQuestion, instructions, 180)
+                    } else {
+                        "Prior exchange for reference only (do not repeat its answer):\n" +
+                            history + "\nNew user request, answer this instead:\n" +
+                            question.take(750) + "\n/no_think"
+                    }
+                    Llama.complete(model!!, fullQuestion, instructions, 220)
                     } finally {
                         safety.edit().remove("inference_in_progress").commit()
                     }
