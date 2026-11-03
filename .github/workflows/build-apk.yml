@@ -88,6 +88,8 @@ jobs:
         run: echo "QUIET_VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
       - name: Install native offline Hindi neural voice runtime and model
         run: bash scripts/install_local_voice.sh
+      - name: Install bundled offline Hey Londe keyword model
+        run: bash scripts/install_londe_wake.sh
       - name: Assemble installable debug APK
         run: gradle --no-daemon :app:assembleDebug
       - name: Delete temporary keystore
