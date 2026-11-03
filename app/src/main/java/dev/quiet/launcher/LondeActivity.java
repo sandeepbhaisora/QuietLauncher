@@ -266,6 +266,11 @@ public final class LondeActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(19),dp(19),dp(19),dp(22));
         root.setBackgroundColor(background);
+        root.setOnApplyWindowInsetsListener((v,insets)->{
+            v.setPadding(dp(19), insets.getSystemWindowInsetTop()+dp(14),
+                    dp(19), insets.getSystemWindowInsetBottom()+dp(14));
+            return insets;
+        });
         setContentView(root);
 
         LinearLayout top=new LinearLayout(this);
