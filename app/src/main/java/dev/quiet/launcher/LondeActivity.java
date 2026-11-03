@@ -52,8 +52,11 @@ public final class LondeActivity extends Activity {
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService work = Executors.newSingleThreadExecutor();
     private final List<LondeClient.Turn> memory = new ArrayList<>();
+    // Cloud-only context: never replay Qwen answers influenced by private notes.
+    private final List<LondeClient.Turn> onlineMemory = new ArrayList<>();
     private TextToSpeech speech;
     private LocalNeuralVoice neuralVoice;
+    private ThinkingHum thinkingHum;
     private SpeechRecognizer recognizer;
     private OfflineWakePipeline wakeDiagnostic;
     private int wakeDiagnosticGeneration;
@@ -104,6 +107,7 @@ public final class LondeActivity extends Activity {
         createConsole();
         selectedEngine=getSharedPreferences("londe_voice_v1",MODE_PRIVATE).getString("tts_engine","");
         neuralVoice = new LocalNeuralVoice(this);
+        thinkingHum = new ThinkingHum(this);
         if (getSharedPreferences("londe_voice_v1", MODE_PRIVATE)
                 .getBoolean("neural_crash_warning_pending", false)) {
             getSharedPreferences("londe_voice_v1", MODE_PRIVATE).edit()
@@ -354,6 +358,7 @@ public final class LondeActivity extends Activity {
         orb.invalidate();
     }
     private void say(String value) {
+        if (thinkingHum != null) thinkingHum.stop();
         if (!readAloud) return;
         String shortened = value.length()>750 ? value.substring(0,750)+"…" : value;
         if (useLocalVoice() && LocalNeuralVoice.modelPackaged(this)) {
@@ -769,6 +774,7 @@ public final class LondeActivity extends Activity {
     @Override protected void onPause(){
         stopWakeDiagnostic();
         inForeground=false;
+        if (thinkingHum != null) thinkingHum.stop();
         releaseRecognizer();
         super.onPause();
     }
@@ -819,6 +825,16 @@ public final class LondeActivity extends Activity {
             ui.postDelayed(this::finish, 2400);
             return;
         }
+        String remembered = LocalMemoryStore.command(this, q);
+        if (remembered != null) {
+            if (LocalMemoryPolicy.parse(q).command == LocalMemoryPolicy.Command.FORGET_ALL) {
+                memory.clear();
+                onlineMemory.clear();
+            }
+            answerSource = "LONDE · PRIVATE ON-DEVICE MEMORY";
+            localAnswer(q, remembered);
+            return;
+        }
         if (PhoneAssistantActions.tryHandle(this, q, response -> {
             answerSource="ANDROID · PHONE SKILLS";
             localAnswer(q,response);
@@ -857,10 +873,12 @@ public final class LondeActivity extends Activity {
             ui.postDelayed(() -> handoff(routing.action), 550);
             return;
         }
+        LocalMemoryStore.countQuestion(this, q);
         if (LocalBrainModels.installed(this) &&
                 getSharedPreferences("quiet_local_v1", MODE_PRIVATE)
                     .getBoolean("londe_local_brain_enabled", true)) {
             busy = true;
+            thinkingHum.begin();
             answerSource = "QWEN3 0.6B · ON-DEVICE";
             setPhase(Phase.THINKING, "LOCAL AI · QWEN3");
             showAnswer("Thinking on your phone · no internet needed…");
@@ -879,6 +897,7 @@ public final class LondeActivity extends Activity {
                                                float speed) {
                     if (isFinishing() || id != requestGeneration) return;
                     busy = false;
+                    thinkingHum.stop();
                     if (fallback) {
                         askChatGptFallback(q);
                         return;
@@ -896,6 +915,7 @@ public final class LondeActivity extends Activity {
                         ui.postDelayed(() -> handoff(permitted), 650);
                         return;
                     }
+                    LocalSessionContext.record(q, text);
                     memory.add(new LondeClient.Turn("user", q));
                     memory.add(new LondeClient.Turn("assistant", text));
                     while (memory.size() > 24) memory.remove(0);
@@ -908,6 +928,7 @@ public final class LondeActivity extends Activity {
                 @Override public void onError(String reason) {
                     if (isFinishing() || id != requestGeneration) return;
                     busy = false;
+                    thinkingHum.stop();
                     android.util.Log.w("LondeLocalBrain", "Local Qwen failed: " + reason);
                     askChatGptFallback(q);
                 }
@@ -944,11 +965,12 @@ public final class LondeActivity extends Activity {
         }
         answerSource = "CHATGPT · ONLINE";
         busy=true;
+        thinkingHum.begin();
         setPhase(Phase.THINKING,"THINKING…");
         showAnswer("Working on it…");
-        memory.add(new LondeClient.Turn("user",q));
-        if(memory.size()>24)memory.remove(0);
-        List<LondeClient.Turn> context=new ArrayList<>(memory);
+        onlineMemory.add(new LondeClient.Turn("user",q));
+        if(onlineMemory.size()>24)onlineMemory.remove(0);
+        List<LondeClient.Turn> context=new ArrayList<>(onlineMemory);
         final int id=++requestGeneration;
         work.execute(()->{
             try{
@@ -957,9 +979,13 @@ public final class LondeActivity extends Activity {
                 ui.post(()->{
                     if(id!=requestGeneration||isFinishing())return;
                     model=result.model;
+                    thinkingHum.stop();
                     answerSource = "CHATGPT · " + result.model + " · ONLINE";
+                    onlineMemory.add(new LondeClient.Turn("assistant",result.text));
+                    if(onlineMemory.size()>24)onlineMemory.remove(0);
+                    memory.add(new LondeClient.Turn("user",q));
                     memory.add(new LondeClient.Turn("assistant",result.text));
-                    if(memory.size()>24)memory.remove(0);
+                    while(memory.size()>24)memory.remove(0);
                     showAnswer(result.text);
                     busy=false;
                     setPhase(Phase.SPEAKING,"REPLY READY");
@@ -971,6 +997,7 @@ public final class LondeActivity extends Activity {
                     if(id!=requestGeneration||isFinishing())return;
                     // Never narrate raw OpenAI connection exceptions to the user.
                     android.util.Log.w("LondeChatFallback", "ChatGPT request failed", ex);
+                    thinkingHum.stop();
                     showAnswer(LocalReplyPolicy.cloudFailedMessage());
                     busy=false;
                     setPhase(Phase.READY,"TRY AGAIN");
@@ -1006,6 +1033,7 @@ public final class LondeActivity extends Activity {
         ui.removeCallbacksAndMessages(null);
         activeSession=false;
         releaseRecognizer();
+        if(thinkingHum!=null)thinkingHum.close();
         if(neuralVoice!=null)neuralVoice.close();
         if(speech!=null){speech.stop();speech.shutdown();}
         super.onDestroy();

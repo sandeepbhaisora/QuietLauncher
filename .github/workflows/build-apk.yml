@@ -75,6 +75,13 @@ jobs:
             app/src/main/java/dev/quiet/launcher/PhoneAssistantIntent.java \
             app/src/test/java/dev/quiet/launcher/PhoneAssistantIntentTest.java
           java -cp /tmp/quiet-phone-intents dev.quiet.launcher.PhoneAssistantIntentTest
+      - name: Test local memory privacy and intent policy (JVM)
+        run: |
+          mkdir -p /tmp/quiet-memory-tests
+          javac -encoding UTF-8 -d /tmp/quiet-memory-tests \
+            app/src/main/java/dev/quiet/launcher/LocalMemoryPolicy.java \
+            app/src/test/java/dev/quiet/launcher/LocalMemoryPolicyTest.java
+          java -cp /tmp/quiet-memory-tests dev.quiet.launcher.LocalMemoryPolicyTest
       - name: Test Qwen-first fallback policy (JVM)
         run: |
           mkdir -p /tmp/quiet-qwen-tests
@@ -117,7 +124,7 @@ jobs:
           # Retain the tiny generated wake-word token phrase; omit ONNX weights.
           find app/src/main/assets/quiet_voice -maxdepth 1 -type f -delete
           find app/src/main/assets/londe_wake -maxdepth 1 -type f \
-            ! -name 'keywords.txt' ! -name 'ORIGIN.txt' -delete
+            ! -name 'keywords.txt' ! -name 'keywords_short.txt' ! -name 'ORIGIN.txt' -delete
           echo "Only native runtime and small wake token metadata will be packaged."
       - name: Assemble installable debug APK
         run: gradle --no-daemon :app:assembleDebug

@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 NAME="sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"
 DEST="app/src/main/assets/londe_wake"
 mkdir -p "$DEST"
-if [[ -s "$DEST/encoder.onnx" && -s "$DEST/keywords.txt" && -s "$DEST/tokens.txt" ]]; then
+if [[ -s "$DEST/encoder.onnx" && -s "$DEST/keywords.txt" && -s "$DEST/keywords_short.txt" && -s "$DEST/tokens.txt" ]]; then
   exit 0
 fi
 tmp="$(mktemp -d)"
@@ -24,14 +24,14 @@ cp "$tmp/$NAME/decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx" "$DEST/decoder
 cp "$tmp/$NAME/joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx" "$DEST/joiner.onnx"
 cp "$tmp/$NAME/tokens.txt" "$DEST/tokens.txt"
 python3 -m pip install --quiet 'sentencepiece==0.2.1'
-python3 - "$tmp/$NAME/bpe.model" "$DEST/tokens.txt" "$DEST/keywords.txt" <<'PY'
+python3 - "$tmp/$NAME/bpe.model" "$DEST/tokens.txt" "$DEST/keywords.txt" "$DEST/keywords_short.txt" <<'PY'
 import sys
 import sentencepiece as spm
-bpe, token_path, output = sys.argv[1:]
+bpe, token_path, output, short_output = sys.argv[1:]
 sp = spm.SentencePieceProcessor(model_file=bpe)
 vocab = {line.rsplit(' ', 1)[0] for line in open(token_path, encoding='utf-8') if line.strip()}
-# Multiple *full* phrases, not a permissive standalone "Londe" keyword.
-# Pronunciation varies across English and Hinglish speakers.
+# Full phrases remain the default; one-word activation must be explicitly enabled
+# because short keywords can trigger by accident.
 phrases = [("HEY LONDE", "HEY_LONDE"),
            ("HEY LONDA", "HEY_LONDA"),
            ("HEY LAUNDE", "HEY_LAUNDE")]
@@ -43,8 +43,20 @@ for phrase, label in phrases:
     lines.append(" ".join(pieces) + " :1.8 #0.28 @" + label)
 with open(output, "w", encoding="utf-8") as f:
     f.write("\n".join(lines) + "\n")
-print("Generated wake phrases:", [p for p, _ in phrases])
+short_phrases = [("LONDE", "LONDE"), ("LAUNDE", "LAUNDE")]
+short_lines = list(lines)
+for phrase, label in short_phrases:
+    pieces = sp.encode(phrase, out_type=str)
+    if not pieces or any(piece not in vocab for piece in pieces):
+        raise SystemExit("Unsupported short wake tokens: " + repr((phrase, pieces)))
+    # Higher per-keyword threshold to limit short-word false activations.
+    short_lines.append(" ".join(pieces) + " :1.5 #0.4 @" + label)
+with open(short_output, "w", encoding="utf-8") as f:
+    f.write("\n".join(short_lines) + "\n")
+print("Default full wake phrases:", [p for p, _ in phrases])
+print("Optional short wake phrases:", [p for p, _ in short_phrases])
 PY
 test -s "$DEST/keywords.txt"
+test -s "$DEST/keywords_short.txt"
 printf 'sherpa-onnx gigaspeech KWS model; see https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html\n' > "$DEST/ORIGIN.txt"
 du -sh "$DEST"

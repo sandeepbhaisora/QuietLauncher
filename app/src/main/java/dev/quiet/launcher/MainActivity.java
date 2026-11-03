@@ -121,6 +121,7 @@ public final class MainActivity extends Activity {
     private QuietFace assistantFace;
     private TextToSpeech londeSpeech;
     private LocalNeuralVoice neuralVoice;
+    private ThinkingHum thinkingHum;
     private boolean voiceReady, replyBusy;
     private String recentReply="Say Hey Londe to ask or command.";
     private String wakeState="VOICE WAKE OFF";
@@ -129,6 +130,8 @@ public final class MainActivity extends Activity {
     private boolean londeSpeaking;
     private String assistantModel="";
     private final List<LondeClient.Turn> homeContext=new ArrayList<>();
+    // Do not send local Qwen replies containing remembered facts to the cloud.
+    private final List<LondeClient.Turn> homeOnlineContext=new ArrayList<>();
 
     private static final class App {
         final String name, packageName, group;
@@ -155,6 +158,7 @@ public final class MainActivity extends Activity {
         widgetHost = new AppWidgetHost(this, WIDGET_HOST_ID);
         setPalette();
         neuralVoice = new LocalNeuralVoice(this);
+        thinkingHum = new ThinkingHum(this);
         if (getSharedPreferences("londe_voice_v1", MODE_PRIVATE)
                 .getBoolean("neural_crash_warning_pending", false)) {
             getSharedPreferences("londe_voice_v1", MODE_PRIVATE).edit()
@@ -254,6 +258,7 @@ public final class MainActivity extends Activity {
     @Override protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
         stopWake();
+        if(thinkingHum!=null)thinkingHum.close();
         if(neuralVoice!=null)neuralVoice.close();
         if(londeSpeech!=null){londeSpeech.stop();londeSpeech.shutdown();}
         background.shutdownNow();
@@ -292,6 +297,7 @@ public final class MainActivity extends Activity {
         LondeVoiceService.rearmWake();
         if(londeSpeech!=null)londeSpeech.stop();
         if(neuralVoice!=null)neuralVoice.stop();
+        if(thinkingHum!=null)thinkingHum.stop();
         londeSpeaking=false;
         ChatGptAuth.onLauncherPaused();
         super.onPause();
@@ -844,6 +850,69 @@ public final class MainActivity extends Activity {
         render();
     }
 
+    private void configureWakeKeyword() {
+        boolean shortPhrase = prefs.getBoolean("londe_wake_short_enabled", false);
+        new AlertDialog.Builder(this).setTitle("Londe wake phrase")
+                .setMessage("Default: Hey Londe. Experimental: also respond to Londe alone. "
+                        + "A one-word hotword may activate unexpectedly or be missed. "
+                        + "Detection stays offline and requires the installed wake model.")
+                .setSingleChoiceItems(new String[]{
+                        "Hey Londe (recommended)",
+                        "Hey Londe or Londe (experimental)"}, shortPhrase ? 1 : 0,
+                        (dialog, which) -> {
+                            dialog.dismiss();
+                            boolean enabled=which==1;
+                            if(prefs.getBoolean("londe_wake_short_enabled",false)==enabled)return;
+                            prefs.edit().putBoolean("londe_wake_short_enabled",enabled).apply();
+                            stopWake();
+                            LondeVoiceService.refreshWake();
+                            handler.postDelayed(this::startWakeIfAllowed,650);
+                            render();
+                        })
+                .setNegativeButton("Cancel",null).show();
+    }
+
+    private void configureLocalMemory() {
+        String[] options={
+                LocalMemoryStore.enabled(this) ? "Turn memory OFF" : "Enable saved local memory",
+                "Review saved notes and topic interests",
+                "Erase all saved local memory",
+                prefs.getBoolean("londe_thinking_hum",true)
+                        ? "Turn thinking hum OFF" : "Turn thinking hum ON"
+        };
+        new AlertDialog.Builder(this).setTitle("Private Londe memory")
+                .setMessage("Saved memory is opt-in. Only explicit Remember commands "
+                        + "and broad question-category counts are saved to this phone. "
+                        + "No raw questions, notification text, messages or calendar entries are saved. "
+                        + "A short conversation context is held in RAM separately.")
+                .setItems(options,(dialog,which)-> {
+                    if(which==0) {
+                        LocalMemoryStore.enable(this,!LocalMemoryStore.enabled(this));
+                        render();
+                    } else if(which==1) {
+                        new AlertDialog.Builder(this).setTitle("Saved on this phone")
+                                .setMessage(LocalMemoryStore.describe(this))
+                                .setPositiveButton("OK",null).show();
+                    } else if(which==2) {
+                        new AlertDialog.Builder(this).setTitle("Erase local memory?")
+                                .setMessage("Delete all saved notes and question-category counts? "
+                                        + "This cannot be undone.")
+                                .setPositiveButton("Erase",(confirm,button)-> {
+                                    LocalMemoryStore.clear(this);
+                                    LocalSessionContext.clear();
+                                    homeContext.clear();
+                                    homeOnlineContext.clear();
+                                    render();
+                                })
+                                .setNegativeButton("Cancel",null).show();
+                    } else {
+                        boolean next=!prefs.getBoolean("londe_thinking_hum",true);
+                        prefs.edit().putBoolean("londe_thinking_hum",next).apply();
+                        render();
+                    }
+                }).setNegativeButton("Cancel",null).show();
+    }
+
     private void configureWake() {
         boolean enabled = prefs.getBoolean("londe_wake_enabled", false);
         if (!LondeKeywordDetector.available(this)) {
@@ -914,6 +983,7 @@ public final class MainActivity extends Activity {
                 .putString("voice_mode", neural ? "neural" : "android").apply();
     }
     private void speakLonde(String message, String utteranceId) {
+        if(thinkingHum!=null)thinkingHum.stop();
         String text = message == null ? "" : message;
         if (useLocalNeuralVoice() && LocalNeuralVoice.modelPackaged(this)) {
             londeSpeaking = true;
@@ -1176,6 +1246,18 @@ public final class MainActivity extends Activity {
         if(replyBusy){wakeStatus("BUSY · TRY AGAIN");return;}
         stopWake();
         if(q.length()>700){wakeStatus("REQUEST TOO LONG");return;}
+        String remembered = LocalMemoryStore.command(this,q);
+        if(remembered != null) {
+            if(LocalMemoryPolicy.parse(q).command == LocalMemoryPolicy.Command.FORGET_ALL) {
+                homeContext.clear();
+                homeOnlineContext.clear();
+            }
+            recentReply = "You: " + q + "\n\nSOURCE: PRIVATE ON-DEVICE MEMORY\n\nLonde: " + remembered;
+            if(londeReply!=null)londeReply.setText(recentReply);
+            wakeStatus("LOCAL MEMORY");
+            speakLonde(remembered, "londe-memory-" + SystemClock.uptimeMillis());
+            return;
+        }
         if(PhoneAssistantActions.tryHandle(this,q,response -> {
             recentReply="You: "+q+"\n\nSOURCE: ANDROID PHONE SKILLS · ON DEVICE\n\nLonde: "+response;
             if(londeReply!=null)londeReply.setText(recentReply);
@@ -1208,9 +1290,11 @@ public final class MainActivity extends Activity {
             handleLondeAction(action);
             return;
         }
+        LocalMemoryStore.countQuestion(this, q);
         if (LocalBrainModels.installed(this) &&
                 prefs.getBoolean("londe_local_brain_enabled", true)) {
             replyBusy = true;
+            thinkingHum.begin();
             wakeStatus("LOCAL QWEN3 THINKING");
             if (londeReply != null) londeReply.setText("You: " + q + "\n\nThinking on this phone…");
             StringBuilder history = new StringBuilder();
@@ -1226,6 +1310,7 @@ public final class MainActivity extends Activity {
                                                 boolean fallback, float speed) {
                     if (isFinishing() || isDestroyed()) return;
                     replyBusy = false;
+                    thinkingHum.stop();
                     if (fallback) { homeAskFallback(q); return; }
                     if (suggestedAction != null) {
                         String allowed = LondeCommands.normalize(suggestedAction);
@@ -1236,6 +1321,7 @@ public final class MainActivity extends Activity {
                         handleLondeAction(allowed);
                         return;
                     }
+                    LocalSessionContext.record(q, text);
                     homeContext.add(new LondeClient.Turn("user", q));
                     homeContext.add(new LondeClient.Turn("assistant", text));
                     while (homeContext.size() > 18) homeContext.remove(0);
@@ -1248,6 +1334,7 @@ public final class MainActivity extends Activity {
                 @Override public void onError(String reason) {
                     if (isFinishing() || isDestroyed()) return;
                     replyBusy = false;
+                    thinkingHum.stop();
                     homeAskFallback(q);
                 }
             });
@@ -1281,11 +1368,11 @@ public final class MainActivity extends Activity {
             if(londeReply!=null)londeReply.setText(recentReply);
             wakeStatus("CHATGPT NOT CONNECTED");return;
         }
-        replyBusy=true;wakeStatus("LONDE THINKING…");
+        replyBusy=true;thinkingHum.begin();wakeStatus("LONDE THINKING…");
         if(londeReply!=null)londeReply.setText("You: "+q+"\n\nThinking…");
-        homeContext.add(new LondeClient.Turn("user",q));
-        if(homeContext.size()>18)homeContext.remove(0);
-        List<LondeClient.Turn> history=new ArrayList<>(homeContext);
+        homeOnlineContext.add(new LondeClient.Turn("user",q));
+        if(homeOnlineContext.size()>18)homeOnlineContext.remove(0);
+        List<LondeClient.Turn> history=new ArrayList<>(homeOnlineContext);
         background.execute(()->{
             try {
                 LondeClient.Answer result=LondeClient.ask(this,history,assistantModel,
@@ -1295,8 +1382,12 @@ public final class MainActivity extends Activity {
                     }));
                 handler.post(()->{
                     if(isFinishing()||isDestroyed())return;
-                    assistantModel=result.model;replyBusy=false;
+                    assistantModel=result.model;replyBusy=false;thinkingHum.stop();
+                    homeOnlineContext.add(new LondeClient.Turn("assistant",result.text));
+                    while(homeOnlineContext.size()>18)homeOnlineContext.remove(0);
+                    homeContext.add(new LondeClient.Turn("user",q));
                     homeContext.add(new LondeClient.Turn("assistant",result.text));
+                    while(homeContext.size()>18)homeContext.remove(0);
                     recentReply="You: "+q+"\n\nSOURCE: CHATGPT · "+result.model+" · ONLINE\n\nLonde: "+result.text;
                     if(londeReply!=null)londeReply.setText(recentReply);
                     wakeStatus("LONDE REPLIED");
@@ -1307,6 +1398,7 @@ public final class MainActivity extends Activity {
             }catch(Exception e){
                 handler.post(()->{
                     replyBusy=false;
+                    thinkingHum.stop();
                     android.util.Log.w("QuietChatFallback", "Cloud request failed", e);
                     recentReply = LocalReplyPolicy.cloudFailedMessage();
                     if(londeReply!=null)londeReply.setText(recentReply);
@@ -2214,6 +2306,9 @@ public final class MainActivity extends Activity {
                 : prefs.getBoolean("londe_wake_enabled",false)
                     ? "On · offline keyword spotter" : "Off · tap to enable Hey Londe",
                 () -> configureWake());
+        setting("Wake phrase", prefs.getBoolean("londe_wake_short_enabled",false)
+                ? "Hey Londe or Londe · experimental" : "Hey Londe only · recommended",
+                this::configureWakeKeyword);
         setting("Hey Londe sensitivity",
                 prefs.getBoolean("londe_wake_high_sensitivity",true)
                     ? "High · easier to trigger, may cause false alarms" : "Standard · fewer false alarms",
@@ -2247,6 +2342,16 @@ public final class MainActivity extends Activity {
                 : "Optional · check WhatsApp notifications locally",
                 () -> PhoneAssistantActions.requestNotificationAccess(this));
         section(main, "LOCAL AI", null, null);
+        setting("On-device memory", LocalMemoryStore.status(this),
+                this::configureLocalMemory);
+        setting("Thinking hum", prefs.getBoolean("londe_thinking_hum",true)
+                        ? "On · brief offline hum only if thinking takes longer"
+                        : "Off · quiet while model thinks",
+                () -> {
+                    prefs.edit().putBoolean("londe_thinking_hum",
+                            !prefs.getBoolean("londe_thinking_hum",true)).apply();
+                    render();
+                });
         setting("On-device AI brain · Qwen3", LocalBrainModels.status(this),
                 this::configureLocalBrain);
         setting("Test offline AI", "Ask Londe in airplane mode · watch for OFFLINE QWEN3",
