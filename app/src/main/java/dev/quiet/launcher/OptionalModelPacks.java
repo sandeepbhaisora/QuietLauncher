@@ -67,7 +67,9 @@ final class OptionalModelPacks {
         long total=0;
         for (String file : pack.files) {
             File f=new File(folder,file);
-            if (!f.isFile() || f.length()<128 || f.length()>pack.maximumBytes) return false;
+            long minimum=file.equals("keywords.txt") || file.equals("tts.json")
+                    || file.equals("tokens.txt") ? 1 : 128;
+            if (!f.isFile() || f.length()<minimum || f.length()>pack.maximumBytes) return false;
             total+=f.length();
         }
         return total>=pack.minimumBytes && total<=pack.maximumBytes;
@@ -180,6 +182,16 @@ final class OptionalModelPacks {
         } catch(Exception e) {
             deleteTree(staged);
             throw e;
+        }
+        if (pack==Pack.WAKE) {
+            // The wake keyword list is authored by our build script from the
+            // upstream BPE model; the upstream archive does not contain it.
+            try(java.io.InputStream in=context.getAssets().open("londe_wake/keywords.txt");
+                FileOutputStream out=new FileOutputStream(new File(staged,"keywords.txt"))) {
+                byte[] bytes=new byte[4096];
+                int n;
+                while((n=in.read(bytes))!=-1)out.write(bytes,0,n);
+            }
         }
         if (!validDirectory(staged,pack)) {
             deleteTree(staged);
