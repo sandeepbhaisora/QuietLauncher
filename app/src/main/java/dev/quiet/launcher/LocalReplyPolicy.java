@@ -13,7 +13,7 @@ final class LocalReplyPolicy {
         if (q.matches("(?s).*(\\blatest\\b|\\bbreaking\\b|\\blive\\b|\\bright now\\b|\\bcurrent(?:ly)?\\b|\\brecent news\\b).*"))
             return true;
         if (q.matches("(?s).*(\\bnews\\b|\\bweather\\b|\\bforecast\\b|\\bscore\\b|\\bstock price\\b|\\bmarket price\\b|\\btraffic\\b).*")
-                && q.matches("(?s).*(\\btoday\\b|\\btomorrow\\b|\\bnow\\b|\\bthis week\\b|\\brecent\\b|\\bwhat(?:'s| is)\\b|\\bhow(?:'s| is)\\b).*"))
+                && q.matches("(?s).*(\\btoday\\b|\\btomorrow\\b|\\bnow\\b|\\bthis week\\b|\\brecent\\b|\\bwhat's the\\b|\\bhow's the\\b|\\bhow is the\\b|\\bwhat is the weather\\b).*"))
             return true;
         return q.matches("(?s).*(आज का मौसम|अभी मौसम|आज की खबर|ताज़ा खबर|आज का स्कोर).*");
     }
