@@ -1112,7 +1112,7 @@ public final class MainActivity extends Activity {
         if(checkSelfPermission(Manifest.permission.READ_CALENDAR)!=PackageManager.PERMISSION_GRANTED) {
             pendingCalendarRequest=question;
             wakeStatus("CALENDAR PERMISSION REQUIRED");
-            recentReply="SOURCE: ANDROID CALENDAR\\n\\nGrant calendar access to check your actual events. I won't guess your schedule.";
+            recentReply="SOURCE: ANDROID CALENDAR\n\nGrant calendar access to check your actual events. I won't guess your schedule.";
             if(londeReply!=null)londeReply.setText(recentReply);
             requestPermissions(new String[]{Manifest.permission.READ_CALENDAR},REQ_CALENDAR);
             return;
@@ -1124,7 +1124,7 @@ public final class MainActivity extends Activity {
             handler.post(()->{
                 if(isFinishing()||isDestroyed())return;
                 replyBusy=false;
-                recentReply="You: "+question+"\\n\\nSOURCE: ANDROID CALENDAR · ON-DEVICE\\n\\nLonde: "+answer;
+                recentReply="You: "+question+"\n\nSOURCE: ANDROID CALENDAR · ON-DEVICE\n\nLonde: "+answer;
                 if(londeReply!=null)londeReply.setText(recentReply);
                 wakeStatus("CALENDAR CHECK COMPLETE");
                 speakLonde(answer,"londe-calendar-"+SystemClock.uptimeMillis());
@@ -1147,7 +1147,7 @@ public final class MainActivity extends Activity {
             String response = LocalFirstRouter.localAnswer(routing,
                     System.currentTimeMillis(),
                     prefs.getLong("focusUntil", 0L), Locale.getDefault());
-            recentReply = "You: " + q + "\\n\\nSOURCE: LOCAL PHONE TOOLS\\n\\nLonde: " + response;
+            recentReply = "You: " + q + "\n\nSOURCE: LOCAL PHONE TOOLS\n\nLonde: " + response;
             if (londeReply != null) londeReply.setText(recentReply);
             wakeStatus("ANSWERED OFFLINE");
             if ("response".equals(aiScene) && "home".equals(page)) render();
@@ -1157,7 +1157,7 @@ public final class MainActivity extends Activity {
         String action = routing.kind == LocalFirstRouter.Kind.LOCAL_ACTION
                 ? routing.action : null;
         if(action!=null){
-            recentReply="You asked: "+q+"\\nReview before running.";
+            recentReply="You asked: "+q+"\nReview before running.";
             if(londeReply!=null)londeReply.setText(recentReply);
             wakeStatus("ACTION TO REVIEW");
             handleLondeAction(action);
@@ -1167,14 +1167,14 @@ public final class MainActivity extends Activity {
                 prefs.getBoolean("londe_local_brain_enabled", true)) {
             replyBusy = true;
             wakeStatus("LOCAL QWEN3 THINKING");
-            if (londeReply != null) londeReply.setText("You: " + q + "\\n\\nThinking on this phone…");
+            if (londeReply != null) londeReply.setText("You: " + q + "\n\nThinking on this phone…");
             StringBuilder history = new StringBuilder();
             int start = Math.max(0, homeContext.size() - 6);
             for (int i = start; i < homeContext.size(); i++) {
                 LondeClient.Turn turn = homeContext.get(i);
                 history.append(turn.role).append(": ")
                         .append(turn.text.length() > 180 ?
-                                turn.text.substring(0, 180) : turn.text).append("\\n");
+                                turn.text.substring(0, 180) : turn.text).append("\n");
             }
             LocalBrain.ask(this, q, history.toString(), new LocalBrain.Callback() {
                 @Override public void onResult(String text, String suggestedAction,
@@ -1185,7 +1185,7 @@ public final class MainActivity extends Activity {
                     if (suggestedAction != null) {
                         String allowed = LondeCommands.normalize(suggestedAction);
                         if (allowed == null) { homeAskFallback(q); return; }
-                        recentReply = "Local AI proposed: " + allowed + "\\nReview before running.";
+                        recentReply = "Local AI proposed: " + allowed + "\nReview before running.";
                         if (londeReply != null) londeReply.setText(recentReply);
                         wakeStatus("LOCAL AI · REVIEW ACTION");
                         handleLondeAction(allowed);
@@ -1194,7 +1194,7 @@ public final class MainActivity extends Activity {
                     homeContext.add(new LondeClient.Turn("user", q));
                     homeContext.add(new LondeClient.Turn("assistant", text));
                     while (homeContext.size() > 18) homeContext.remove(0);
-                    recentReply = "You: " + q + "\\n\\nSOURCE: QWEN3 0.6B · ON-DEVICE\\n\\nLonde: " + text;
+                    recentReply = "You: " + q + "\n\nSOURCE: QWEN3 0.6B · ON-DEVICE\n\nLonde: " + text;
                     if (londeReply != null) londeReply.setText(recentReply);
                     wakeStatus(String.format(Locale.ROOT, "OFFLINE QWEN3 · %.1f TOK/S", speed));
                     if ("response".equals(aiScene) && "home".equals(page)) render();
@@ -1213,7 +1213,7 @@ public final class MainActivity extends Activity {
 
     private void homeAskFallback(String q) {
         if (!CloudAvailability.online(this)) {
-            recentReply = "You: " + q + "\\n\\nSOURCE: QWEN3 · OFFLINE FALLBACK\\n\\nLonde: " + LocalReplyPolicy.offlineMessage();
+            recentReply = "You: " + q + "\n\nSOURCE: QWEN3 · OFFLINE FALLBACK\n\nLonde: " + LocalReplyPolicy.offlineMessage();
             if (londeReply != null) londeReply.setText(recentReply);
             wakeStatus("OFFLINE · NO CHATGPT REQUEST");
             speakLonde(LocalReplyPolicy.offlineMessage(),
@@ -1221,7 +1221,7 @@ public final class MainActivity extends Activity {
             return;
         }
         if (!ChatGptAuth.canUsePlan(this)) {
-            recentReply = "You: " + q + "\\n\\nLonde: " + LocalReplyPolicy.unauthorizedMessage();
+            recentReply = "You: " + q + "\n\nLonde: " + LocalReplyPolicy.unauthorizedMessage();
             if (londeReply != null) londeReply.setText(recentReply);
             wakeStatus("CHATGPT NOT AUTHORIZED");
             return;
@@ -1237,7 +1237,7 @@ public final class MainActivity extends Activity {
             wakeStatus("CHATGPT NOT CONNECTED");return;
         }
         replyBusy=true;wakeStatus("LONDE THINKING…");
-        if(londeReply!=null)londeReply.setText("You: "+q+"\\n\\nThinking…");
+        if(londeReply!=null)londeReply.setText("You: "+q+"\n\nThinking…");
         homeContext.add(new LondeClient.Turn("user",q));
         if(homeContext.size()>18)homeContext.remove(0);
         List<LondeClient.Turn> history=new ArrayList<>(homeContext);
@@ -1246,13 +1246,13 @@ public final class MainActivity extends Activity {
                 LondeClient.Answer result=LondeClient.ask(this,history,assistantModel,
                     partial->handler.post(()->{
                         if(!isFinishing()&&londeReply!=null)
-                            londeReply.setText("You: "+q+"\\n\\n"+partial);
+                            londeReply.setText("You: "+q+"\n\n"+partial);
                     }));
                 handler.post(()->{
                     if(isFinishing()||isDestroyed())return;
                     assistantModel=result.model;replyBusy=false;
                     homeContext.add(new LondeClient.Turn("assistant",result.text));
-                    recentReply="You: "+q+"\\n\\nSOURCE: CHATGPT · "+result.model+" · ONLINE\\n\\nLonde: "+result.text;
+                    recentReply="You: "+q+"\n\nSOURCE: CHATGPT · "+result.model+" · ONLINE\n\nLonde: "+result.text;
                     if(londeReply!=null)londeReply.setText(recentReply);
                     wakeStatus("LONDE REPLIED");
                     if ("response".equals(aiScene) && "home".equals(page)) render();
@@ -1499,7 +1499,7 @@ public final class MainActivity extends Activity {
         if (plan.needsPreview()) {
             StringBuilder preview = new StringBuilder();
             for (int i = 0; i < plan.steps.size(); i++)
-                preview.append(i + 1).append(". ").append(plan.steps.get(i).description()).append("\\n");
+                preview.append(i + 1).append(". ").append(plan.steps.get(i).description()).append("\n");
             new AlertDialog.Builder(this).setTitle("Review these actions")
                     .setMessage(preview.toString().trim())
                     .setNegativeButton("Cancel", null)
@@ -2580,7 +2580,7 @@ public final class MainActivity extends Activity {
                     String recognized = matches.get(0);
                     if ("listening".equals(aiScene)) {
                         aiScene = "response";
-                        recentReply = "You: " + recognized + "\\n\\nReview your command before execution.";
+                        recentReply = "You: " + recognized + "\n\nReview your command before execution.";
                         render();
                         homeAsk(recognized);
                         return;
