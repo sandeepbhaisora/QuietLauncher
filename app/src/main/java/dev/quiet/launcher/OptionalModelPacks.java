@@ -29,13 +29,13 @@ final class OptionalModelPacks {
                 new String[]{"duration_predictor.int8.onnx", "text_encoder.int8.onnx",
                     "vector_estimator.int8.onnx", "vocoder.int8.onnx",
                     "tts.json", "unicode_indexer.bin", "voice.bin"},
-                120_000_000L, 200_000_000L),
+                100_000_000L, 250_000_000L),
         WAKE("wake", "Hey Londe wake detector",
                 "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01",
                 "kws-models", "londe_kws_v1",
                 new String[]{"encoder.onnx", "decoder.onnx", "joiner.onnx",
                     "tokens.txt", "keywords.txt"},
-                1_000_000L, 85_000_000L);
+                1_000_000L, 100_000_000L);
 
         final String id, title, archiveName, release, folder;
         final String[] files;
@@ -50,7 +50,7 @@ final class OptionalModelPacks {
 
     private static final String TAG="OptionalModelPacks";
     private static final String PREF="quiet_optional_packs";
-    private static final long MAX_ARCHIVE=240_000_000L;
+    private static final long MAX_ARCHIVE=250_000_000L;
 
     static File modelDirectory(Context context, Pack pack) {
         return new File(context.getFilesDir(), pack.folder);
@@ -148,9 +148,18 @@ final class OptionalModelPacks {
                 String name=entry.getName();
                 int slash=name.lastIndexOf('/');
                 String basename=name.substring(slash+1);
+                if (pack==Pack.WAKE) {
+                    if(basename.equals("encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx"))
+                        basename="encoder.onnx";
+                    else if(basename.equals("decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx"))
+                        basename="decoder.onnx";
+                    else if(basename.equals("joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx"))
+                        basename="joiner.onnx";
+                }
                 if(!needed.contains(basename)) continue;
                 // Fail closed against archive traversal, links and unexpected paths.
-                if(!name.equals(pack.archiveName+"/"+basename) ||
+                if(!name.startsWith(pack.archiveName+"/") ||
+                        name.substring(pack.archiveName.length()+1).contains("/") ||
                         entry.getSize()<128 || entry.getSize()>pack.maximumBytes)
                     throw new IOException("Invalid model archive entry");
                 File outFile=new File(staged,basename);
