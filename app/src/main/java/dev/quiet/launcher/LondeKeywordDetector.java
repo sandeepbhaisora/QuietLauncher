@@ -40,7 +40,10 @@ final class LondeKeywordDetector implements OfflineWakePipeline.Detector {
         // downloaded with an earlier release. Otherwise existing installs
         // keep the original single, less-sensitive HEY LONDE spelling.
         File phrases = new File(folder, "keywords.txt");
-        try (InputStream source = context.getAssets().open(ASSET_DIR + "keywords.txt")) {
+        boolean useShort = context.getSharedPreferences("quiet_local_v1", Context.MODE_PRIVATE)
+                .getBoolean("londe_wake_short_enabled", false);
+        String asset = useShort ? "keywords_short.txt" : "keywords.txt";
+        try (InputStream source = context.getAssets().open(ASSET_DIR + asset)) {
             java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
             byte[] buffer = new byte[4096];
             int n;
