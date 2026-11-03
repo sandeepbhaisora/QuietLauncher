@@ -372,6 +372,12 @@ public final class LondeActivity extends Activity {
         String shortened = value.length()>750 ? value.substring(0,750)+"…" : value;
         if (useLocalVoice() && LocalNeuralVoice.modelPackaged(this)) {
             neuralVoice.speak(shortened, (success,error) -> {
+                if (!success && onlineConsent.pending()) {
+                    onlineConsent.cancel();
+                    showAnswer("The voice model couldn't ask permission. Nothing was sent online.");
+                    setPhase(Phase.READY, "VOICE PERMISSION REQUEST FAILED");
+                    return;
+                }
                 if (!success) {
                     status.setText("LOCAL VOICE ERROR");
                     toast(error == null ? "Local voice unavailable" : error);
@@ -389,7 +395,13 @@ public final class LondeActivity extends Activity {
         String spoken = AndroidSpeechOutput.prepare(speech, shortened, preferred);
         int result=speech.speak(spoken, TextToSpeech.QUEUE_FLUSH, null,
                 "londe-"+SystemClock.uptimeMillis());
-        if(result==TextToSpeech.ERROR)voiceFinished();
+        if(result==TextToSpeech.ERROR) {
+            if (onlineConsent.pending()) {
+                onlineConsent.cancel();
+                showAnswer("Speech playback failed. No GPT request was sent.");
+                setPhase(Phase.READY,"VOICE PERMISSION REQUEST FAILED");
+            } else voiceFinished();
+        }
     }
     private boolean canSpeak() {
         return readAloud && ((useLocalVoice() && LocalNeuralVoice.modelPackaged(this)) || speechReady);
@@ -423,6 +435,12 @@ public final class LondeActivity extends Activity {
         else keyboard.clearFocus();
     }
     private void toggleSound() {
+        if (onlineConsent.pending()) {
+            onlineConsent.cancel();
+            releaseRecognizer();
+            showAnswer("Voice permission request cancelled. No data was sent online.");
+            setPhase(Phase.READY,"GPT PERMISSION CANCELLED");
+        }
         readAloud=!readAloud;
         speaker.setText(readAloud?"◖))  ON":"◖))  OFF");
         if(!readAloud && speech!=null)speech.stop();
@@ -430,6 +448,12 @@ public final class LondeActivity extends Activity {
     }
     private void voiceFinished(){
         if(!inForeground||isFinishing())return;
+        if (onlineConsent.pending() && !readAloud) {
+            onlineConsent.cancel();
+            showAnswer("Voice is muted. GPT online permission was not granted.");
+            setPhase(Phase.READY,"VOICE CONFIRMATION UNAVAILABLE");
+            return;
+        }
         if (onlineConsent.pending()) {
             // Speech output finished: only now open the microphone.
             if (!onlineConsent.listening()) {
