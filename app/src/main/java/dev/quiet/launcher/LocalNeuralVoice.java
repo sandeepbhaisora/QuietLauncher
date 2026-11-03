@@ -142,7 +142,7 @@ final class LocalNeuralVoice {
                 if (closed || request != sequence.get()) return;
 
                 boolean hindi = HindiSpeech.containsDevanagari(clean)
-                        || clean.matches("(?i)(?s).*\\\\b(haan|bhai|bolo|theek hai|shukriya)\\\\b.*");
+                        || clean.matches("(?i)(?s).*\\b(haan|bhai|bolo|theek hai|shukriya)\\b.*");
                 String spoken = hindi ? HindiSpeech.prepare(clean, Locale.forLanguageTag("hi-IN")) : clean;
                 GenerationConfig config = new GenerationConfig();
                 config.setSid(6);
