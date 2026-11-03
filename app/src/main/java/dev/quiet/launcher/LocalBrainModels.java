@@ -90,8 +90,18 @@ final class LocalBrainModels {
 
     static boolean needsVerification(Context context) {
         File f = model(context);
-        return !installed(context) && f.isFile() && f.length() >= MIN_SIZE
-                && f.length() <= MAX_SIZE;
+        if (installed(context) || !f.isFile() || f.length() < MIN_SIZE
+                || f.length() > MAX_SIZE) return false;
+        SharedPreferences prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE);
+        long downloadId = prefs.getLong("download_id", -1L);
+        if (downloadId < 0) return true; // Existing manually restored model.
+        DownloadManager manager = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+        if (manager == null) return false;
+        try (Cursor cursor = manager.query(new DownloadManager.Query().setFilterById(downloadId))) {
+            if (cursor == null || !cursor.moveToFirst()) return false;
+            return cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                    == DownloadManager.STATUS_SUCCESSFUL;
+        } catch (Exception ex) { return false; }
     }
 
     static boolean verify(Context context) throws Exception {
