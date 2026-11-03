@@ -1000,10 +1000,10 @@ public final class MainActivity extends Activity {
                                                 boolean fallback, float speed) {
                     if (isFinishing() || isDestroyed()) return;
                     replyBusy = false;
-                    if (fallback) { homeAskOnline(q); return; }
+                    if (fallback) { homeAskFallback(q); return; }
                     if (suggestedAction != null) {
                         String allowed = LondeCommands.normalize(suggestedAction);
-                        if (allowed == null) { homeAskOnline(q); return; }
+                        if (allowed == null) { homeAskFallback(q); return; }
                         recentReply = "Local AI proposed: " + allowed + "\\nReview before running.";
                         if (londeReply != null) londeReply.setText(recentReply);
                         wakeStatus("LOCAL AI · REVIEW ACTION");
@@ -1022,11 +1022,30 @@ public final class MainActivity extends Activity {
                 @Override public void onError(String reason) {
                     if (isFinishing() || isDestroyed()) return;
                     replyBusy = false;
-                    homeAskOnline(q);
+                    homeAskFallback(q);
                 }
             });
             return;
         }
+        homeAskOnline(q);
+    }
+
+    private void homeAskFallback(String q) {
+        if (!CloudAvailability.online(this)) {
+            recentReply = "You: " + q + "\\n\\nLonde: " + LocalReplyPolicy.offlineMessage();
+            if (londeReply != null) londeReply.setText(recentReply);
+            wakeStatus("OFFLINE · NO CHATGPT REQUEST");
+            speakLonde(LocalReplyPolicy.offlineMessage(),
+                    "londe-no-internet-" + SystemClock.uptimeMillis());
+            return;
+        }
+        if (!ChatGptAuth.canUsePlan(this)) {
+            recentReply = "You: " + q + "\\n\\nLonde: " + LocalReplyPolicy.unauthorizedMessage();
+            if (londeReply != null) londeReply.setText(recentReply);
+            wakeStatus("CHATGPT NOT AUTHORIZED");
+            return;
+        }
+        wakeStatus("QWEN → CHATGPT FALLBACK");
         homeAskOnline(q);
     }
 
@@ -1062,7 +1081,8 @@ public final class MainActivity extends Activity {
             }catch(Exception e){
                 handler.post(()->{
                     replyBusy=false;
-                    recentReply="Londe couldn't answer. "+(e.getMessage()==null?"Try again.":e.getMessage());
+                    android.util.Log.w("QuietChatFallback", "Cloud request failed", e);
+                    recentReply = LocalReplyPolicy.cloudFailedMessage();
                     if(londeReply!=null)londeReply.setText(recentReply);
                     wakeStatus("REQUEST FAILED");
                     handler.postDelayed(this::startWakeIfAllowed,1800);
