@@ -827,6 +827,10 @@ public final class LondeActivity extends Activity {
         }
         String remembered = LocalMemoryStore.command(this, q);
         if (remembered != null) {
+            if (LocalMemoryPolicy.parse(q).command == LocalMemoryPolicy.Command.FORGET_ALL) {
+                memory.clear();
+                onlineMemory.clear();
+            }
             answerSource = "LONDE · PRIVATE ON-DEVICE MEMORY";
             localAnswer(q, remembered);
             return;

@@ -900,6 +900,8 @@ public final class MainActivity extends Activity {
                                 .setPositiveButton("Erase",(confirm,button)-> {
                                     LocalMemoryStore.clear(this);
                                     LocalSessionContext.clear();
+                                    homeContext.clear();
+                                    homeOnlineContext.clear();
                                     render();
                                 })
                                 .setNegativeButton("Cancel",null).show();
@@ -1246,6 +1248,10 @@ public final class MainActivity extends Activity {
         if(q.length()>700){wakeStatus("REQUEST TOO LONG");return;}
         String remembered = LocalMemoryStore.command(this,q);
         if(remembered != null) {
+            if(LocalMemoryPolicy.parse(q).command == LocalMemoryPolicy.Command.FORGET_ALL) {
+                homeContext.clear();
+                homeOnlineContext.clear();
+            }
             recentReply = "You: " + q + "\n\nSOURCE: PRIVATE ON-DEVICE MEMORY\n\nLonde: " + remembered;
             if(londeReply!=null)londeReply.setText(recentReply);
             wakeStatus("LOCAL MEMORY");
