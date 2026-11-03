@@ -275,6 +275,7 @@ public final class MainActivity extends Activity {
         // Browser-based ChatGPT OAuth completes only after Quiet becomes active again.
         ChatGptAuth.onLauncherResumed();
         foregroundHome=true;
+        LondeVoiceService.foregroundOwner(true, true);
         // Do not start Android SpeechRecognizer when the launcher becomes visible.
         if (initialResumePending) {
             initialResumePending = false;
@@ -289,7 +290,7 @@ public final class MainActivity extends Activity {
     @Override protected void onPause() {
         foregroundHome=false;
         stopWake();
-        LondeVoiceService.rearmWake();
+        LondeVoiceService.foregroundOwner(true, false);
         if(londeSpeech!=null)londeSpeech.stop();
         if(neuralVoice!=null)neuralVoice.stop();
         londeSpeaking=false;
