@@ -1960,6 +1960,12 @@ public final class MainActivity extends Activity {
         setting("Voice wake: Hey Londe", prefs.getBoolean("londe_wake_enabled",false)
             ? "On · offline keyword spotter" : "Off · enable local Hey Londe detector",
             () -> configureWake());
+        setting("Test Hey Londe detector", "Foreground test · shows model and mic errors",
+            () -> {
+                Intent diagnostic = new Intent(this, LondeActivity.class);
+                diagnostic.putExtra("wake_diagnostic", true);
+                startActivity(diagnostic);
+            });
         setting("Londe voice engine", "Choose offline voice · free neural TTS option", this::configureLondeVoice);
         setting("Londe assistant", "Voice-first assistant · answers and device commands", this::openLonde);
         section(main, "LOCAL AI", null, null);
