@@ -39,6 +39,7 @@ final class LocalMemoryStore {
         if(parsed.command==LocalMemoryPolicy.Command.NONE)return null;
         if(parsed.command==LocalMemoryPolicy.Command.FORGET_ALL) {
             clear(c);
+            LocalSessionContext.clear();
             return "Local memories and question-topic counts cleared from this device.";
         }
         if(!enabled(c))

@@ -52,6 +52,8 @@ public final class LondeActivity extends Activity {
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService work = Executors.newSingleThreadExecutor();
     private final List<LondeClient.Turn> memory = new ArrayList<>();
+    // Cloud-only context: never replay Qwen answers influenced by private notes.
+    private final List<LondeClient.Turn> onlineMemory = new ArrayList<>();
     private TextToSpeech speech;
     private LocalNeuralVoice neuralVoice;
     private ThinkingHum thinkingHum;
@@ -962,9 +964,9 @@ public final class LondeActivity extends Activity {
         thinkingHum.begin();
         setPhase(Phase.THINKING,"THINKING…");
         showAnswer("Working on it…");
-        memory.add(new LondeClient.Turn("user",q));
-        if(memory.size()>24)memory.remove(0);
-        List<LondeClient.Turn> context=new ArrayList<>(memory);
+        onlineMemory.add(new LondeClient.Turn("user",q));
+        if(onlineMemory.size()>24)onlineMemory.remove(0);
+        List<LondeClient.Turn> context=new ArrayList<>(onlineMemory);
         final int id=++requestGeneration;
         work.execute(()->{
             try{
@@ -975,8 +977,11 @@ public final class LondeActivity extends Activity {
                     model=result.model;
                     thinkingHum.stop();
                     answerSource = "CHATGPT · " + result.model + " · ONLINE";
+                    onlineMemory.add(new LondeClient.Turn("assistant",result.text));
+                    if(onlineMemory.size()>24)onlineMemory.remove(0);
+                    memory.add(new LondeClient.Turn("user",q));
                     memory.add(new LondeClient.Turn("assistant",result.text));
-                    if(memory.size()>24)memory.remove(0);
+                    while(memory.size()>24)memory.remove(0);
                     showAnswer(result.text);
                     busy=false;
                     setPhase(Phase.SPEAKING,"REPLY READY");

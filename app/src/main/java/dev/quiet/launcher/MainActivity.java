@@ -130,6 +130,8 @@ public final class MainActivity extends Activity {
     private boolean londeSpeaking;
     private String assistantModel="";
     private final List<LondeClient.Turn> homeContext=new ArrayList<>();
+    // Do not send local Qwen replies containing remembered facts to the cloud.
+    private final List<LondeClient.Turn> homeOnlineContext=new ArrayList<>();
 
     private static final class App {
         final String name, packageName, group;
@@ -1362,9 +1364,9 @@ public final class MainActivity extends Activity {
         }
         replyBusy=true;thinkingHum.begin();wakeStatus("LONDE THINKING…");
         if(londeReply!=null)londeReply.setText("You: "+q+"\n\nThinking…");
-        homeContext.add(new LondeClient.Turn("user",q));
-        if(homeContext.size()>18)homeContext.remove(0);
-        List<LondeClient.Turn> history=new ArrayList<>(homeContext);
+        homeOnlineContext.add(new LondeClient.Turn("user",q));
+        if(homeOnlineContext.size()>18)homeOnlineContext.remove(0);
+        List<LondeClient.Turn> history=new ArrayList<>(homeOnlineContext);
         background.execute(()->{
             try {
                 LondeClient.Answer result=LondeClient.ask(this,history,assistantModel,
@@ -1375,7 +1377,11 @@ public final class MainActivity extends Activity {
                 handler.post(()->{
                     if(isFinishing()||isDestroyed())return;
                     assistantModel=result.model;replyBusy=false;thinkingHum.stop();
+                    homeOnlineContext.add(new LondeClient.Turn("assistant",result.text));
+                    while(homeOnlineContext.size()>18)homeOnlineContext.remove(0);
+                    homeContext.add(new LondeClient.Turn("user",q));
                     homeContext.add(new LondeClient.Turn("assistant",result.text));
+                    while(homeContext.size()>18)homeContext.remove(0);
                     recentReply="You: "+q+"\n\nSOURCE: CHATGPT · "+result.model+" · ONLINE\n\nLonde: "+result.text;
                     if(londeReply!=null)londeReply.setText(recentReply);
                     wakeStatus("LONDE REPLIED");
