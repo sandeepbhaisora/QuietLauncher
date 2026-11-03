@@ -46,12 +46,15 @@ import java.util.concurrent.Executors;
  */
 public final class LondeActivity extends Activity {
     private static final int REQUEST_MIC = 511;
+    private static final int REQUEST_WAKE_TEST_MIC = 512;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService work = Executors.newSingleThreadExecutor();
     private final List<LondeClient.Turn> memory = new ArrayList<>();
     private TextToSpeech speech;
     private LocalNeuralVoice neuralVoice;
     private SpeechRecognizer recognizer;
+    private OfflineWakePipeline wakeDiagnostic;
+    private int wakeDiagnosticGeneration;
     private boolean activeSession, recognizerRunning, inForeground=true;
     private String selectedEngine="";
     private int silenceCount;
@@ -108,8 +111,11 @@ public final class LondeActivity extends Activity {
         initSpeech();
         if (getIntent() != null && Intent.ACTION_ASSIST.equals(getIntent().getAction()))
             getIntent().putExtra("auto_listen", true);
-        if (getIntent() != null && getIntent().getBooleanExtra("auto_listen", false))
-            ui.postDelayed(this::ensureListening, 450);
+        if (getIntent() != null && getIntent().getBooleanExtra("wake_diagnostic", false)) {
+            ui.postDelayed(this::startWakeDiagnostic, 550);
+        } else if (getIntent() != null && getIntent().getBooleanExtra("auto_listen", false)) {
+            ui.postDelayed(this::ensureListening, 650);
+        }
     }
 
     private void initSpeech(){
@@ -414,9 +420,80 @@ public final class LondeActivity extends Activity {
             ui.postDelayed(()->{if(activeSession&&!busy&&inForeground)startRecognition();},550);
         } else if(!busy) setPhase(Phase.READY,"TAP TO SPEAK");
     }
+    private void startWakeDiagnostic() {
+        if (wakeDiagnostic != null) return;
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            setPhase(Phase.READY, "WAKE TEST · MIC PERMISSION");
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_WAKE_TEST_MIC);
+            return;
+        }
+        if (!LondeKeywordDetector.available(this)) {
+            setPhase(Phase.READY, "WAKE MODEL NOT BUNDLED");
+            showAnswer("This APK does not include the offline HEY LONDE keyword model.");
+            return;
+        }
+        LondeVoiceService.pauseWakeForSession();
+        final int id = ++wakeDiagnosticGeneration;
+        setPhase(Phase.LISTENING, "LOADING LOCAL WAKE MODEL…");
+        showAnswer("Foreground keyword test. Say 'Hey Londe' clearly. It should detect the phrase without a tap. Tap TALK to switch to normal speech recognition.");
+        work.execute(() -> {
+            OfflineWakePipeline.Detector detector;
+            try {
+                detector = new LondeKeywordDetector(this);
+            } catch (Throwable error) {
+                ui.post(() -> {
+                    if (id != wakeDiagnosticGeneration || isFinishing()) return;
+                    setPhase(Phase.READY, "WAKE MODEL LOAD FAILED");
+                    showAnswer("Offline wake model failed to load: " +
+                            error.getClass().getSimpleName() + ". This is separate from speech recognition.");
+                });
+                return;
+            }
+            ui.post(() -> {
+                if (id != wakeDiagnosticGeneration || isFinishing() || !inForeground) {
+                    detector.close();
+                    return;
+                }
+                OfflineWakePipeline pipeline = new OfflineWakePipeline(this,
+                        new OfflineWakePipeline.Events() {
+                            @Override public void onWake() {
+                                wakeDiagnostic = null;
+                                ++wakeDiagnosticGeneration;
+                                setPhase(Phase.READY, "HEY LONDE DETECTED!");
+                                showAnswer("Wake phrase detected locally. Starting speech recognition…");
+                                ui.postDelayed(LondeActivity.this::ensureListening, 500);
+                            }
+                            @Override public void onError(String reason) {
+                                wakeDiagnostic = null;
+                                setPhase(Phase.READY, "WAKE MICROPHONE ERROR");
+                                showAnswer("Wake-word test failed: " + reason);
+                            }
+                        });
+                if (pipeline.start(detector)) {
+                    wakeDiagnostic = pipeline;
+                    setPhase(Phase.LISTENING, "SAY 'HEY LONDE' NOW");
+                } else {
+                    detector.close();
+                    setPhase(Phase.READY, "WAKE TEST COULD NOT START");
+                    showAnswer("Failed to start wake microphone. Check Quiet's microphone permission.");
+                }
+            });
+        });
+    }
+
+    private void stopWakeDiagnostic() {
+        ++wakeDiagnosticGeneration;
+        if (wakeDiagnostic != null) {
+            wakeDiagnostic.stop();
+            wakeDiagnostic = null;
+        }
+    }
+
     /** Start-only: auto-start + a rapid tap must never toggle the mic OFF. */
     private void ensureListening() {
         if (isFinishing() || isDestroyed()) return;
+        stopWakeDiagnostic();
         if (activeSession) {
             if (!recognizerRunning && !busy) startRecognition();
             else if (recognizerRunning) setPhase(Phase.LISTENING, "ALREADY LISTENING…");
@@ -448,6 +525,7 @@ public final class LondeActivity extends Activity {
 
     /** Explicit stop is a long-press, not a second accidental tap. */
     private void stopListening() {
+        stopWakeDiagnostic();
         activeSession = false;
         if (recognizer != null) {
             try { recognizer.cancel(); } catch (Exception ignored) {}
@@ -578,11 +656,21 @@ public final class LondeActivity extends Activity {
     }
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){
         super.onRequestPermissionsResult(request,permissions,results);
+        if (request == REQUEST_WAKE_TEST_MIC) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED)
+                startWakeDiagnostic();
+            else {
+                setPhase(Phase.READY, "WAKE MIC PERMISSION DENIED");
+                showAnswer("Grant Quiet microphone permission in Samsung App info → Permissions.");
+            }
+            return;
+        }
         if(request==REQUEST_MIC&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)ensureListening();
         else if(request==REQUEST_MIC){setPhase(Phase.READY,"MIC PERMISSION DENIED");
             showAnswer("Please grant microphone access to Quiet in Android App info → Permissions.");}
     }
     @Override protected void onPause(){
+        stopWakeDiagnostic();
         inForeground=false;
         if(recognizer!=null){recognizer.cancel();recognizerRunning=false;}
         super.onPause();
@@ -760,6 +848,7 @@ public final class LondeActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        stopWakeDiagnostic();
         LondeVoiceService.rearmWake();
         requestGeneration++;
         work.shutdownNow();
