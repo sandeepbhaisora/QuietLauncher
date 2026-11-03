@@ -339,7 +339,8 @@ public final class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        if (!page.equals("home")) show("home");
+        if(page.startsWith("settings_"))show("settings");
+        else if (!page.equals("home")) show("home");
         // Home screens should stay on screen, not reveal a blank Activity.
     }
 
@@ -425,7 +426,7 @@ public final class MainActivity extends Activity {
     private void render() {
         if (prefs == null) return;
         setPalette(); focusLive = null; clockLive = null;
-        shell = column(); shell.setBackgroundColor("home".equals(page) ? c("#041322") : bg);
+        shell = column(); shell.setBackgroundColor(("home".equals(page)||page.startsWith("settings")) ? V2_BG : bg);
         shell.setPadding(dp(18), dp(7), dp(18), dp(6));
         // Android 15+ draws behind system bars by default. Respect both insets.
         shell.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -470,6 +471,9 @@ public final class MainActivity extends Activity {
             case "inbox": renderInbox(); break;
             case "usage": renderUsage(); break;
             case "widgets": renderWidgets(); break;
+            case "settings_ai": case "settings_memory": case "settings_tools":
+            case "settings_voice": case "settings_phone": case "settings_advanced":
+                renderSettingsDetails(); break;
             default: renderSettings(); break;
         }
         if (!"home".equals(page)) shell.addView(bottomNav());
@@ -478,27 +482,25 @@ public final class MainActivity extends Activity {
     }
 
     private LinearLayout bottomNav() {
-        LinearLayout nav = row();
-        nav.setPadding(dp(1), dp(7), dp(1), dp(3));
-        View border = new View(this);
-        border.setBackgroundColor(line);
-        shell.addView(border, new LinearLayout.LayoutParams(-1, dp(1)));
-        String[][] tabs = {{"⌂", "Home", "home"}, {"▦", "Apps", "apps"},
-                {"◷", "Day", "root"}, {"▤", "Chats", "inbox"}, {"⚙", "Settings", "settings"}};
-        for (String[] tab : tabs) {
-            boolean active = page.equals(tab[2]) || (page.equals("widgets") && tab[2].equals("root"));
-            LinearLayout cell = column();
-            cell.setGravity(Gravity.CENTER);
-            cell.setContentDescription(tab[1]);
-            TextView symbol = text(tab[0], 19, active ? ink : muted, false);
-            symbol.setGravity(Gravity.CENTER);
-            TextView name = text(tab[1], 10, active ? ink : muted, active);
-            name.setGravity(Gravity.CENTER);
-            cell.addView(symbol);
-            cell.addView(name);
-            if (active) cell.setBackground(shape(surface2, 13, 0));
-            nav.addView(cell, new LinearLayout.LayoutParams(0, dp(54), 1));
-            cell.setOnClickListener(v -> show(tab[2]));
+        LinearLayout nav=row();
+        nav.setPadding(dp(4),dp(9),dp(4),dp(8));
+        nav.setBackground(v2Shape(V2_SURFACE_LIGHT,V2_SURFACE,24,V2_LINE));
+        String[][] tabs={{"⌂","Home","home"},{"✦","Londe","assistant"},
+                {"▦","Apps","apps"},{"⚙","Settings","settings"}};
+        for(String[] tab:tabs){
+            boolean active=("settings".equals(tab[2]) && page.startsWith("settings"))
+                    || page.equals(tab[2]);
+            LinearLayout item=column();item.setGravity(Gravity.CENTER);
+            TextView icon=text(tab[0],21,active?V2_MINT:V2_DIM,true);
+            icon.setGravity(Gravity.CENTER);
+            TextView title=text(tab[1],11,active?V2_MINT:V2_TEXT,active);
+            title.setGravity(Gravity.CENTER);
+            item.addView(icon);item.addView(title);
+            nav.addView(item,new LinearLayout.LayoutParams(0,dp(52),1));
+            item.setOnClickListener(v->{
+                if("assistant".equals(tab[2]))openLonde();
+                else show(tab[2]);
+            });
         }
         return nav;
     }
@@ -534,7 +536,203 @@ public final class MainActivity extends Activity {
         // User action only; this is NOT continuous wake-word recognition.
         startVoiceInput();
     }
+    private static final int V2_BG = 0xff071510;
+    private static final int V2_SURFACE = 0xff112b24;
+    private static final int V2_SURFACE_LIGHT = 0xff173a2f;
+    private static final int V2_MINT = 0xffa4f6c5;
+    private static final int V2_LINE = 0xff315b49;
+    private static final int V2_TEXT = 0xffeffbf3;
+    private static final int V2_DIM = 0xffa0bdad;
+
+    private GradientDrawable v2Shape(int start, int end, int radius, int stroke) {
+        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{start, end});
+        d.setCornerRadius(dp(radius));
+        if(stroke!=0)d.setStroke(dp(1),stroke);
+        return d;
+    }
+    private LinearLayout v2Panel() {
+        LinearLayout p = column();
+        p.setPadding(dp(17),dp(17),dp(17),dp(17));
+        p.setBackground(v2Shape(V2_SURFACE_LIGHT,V2_SURFACE,23,V2_LINE));
+        return p;
+    }
+    private TextView v2Text(String label,int size,boolean bold) {
+        return text(label,size,V2_TEXT,bold);
+    }
+    private TextView v2Caption(String label) {
+        return text(label,12,V2_DIM,false);
+    }
+    private TextView v2Pill(String label,Runnable action) {
+        TextView b=text(label,13,V2_TEXT,true);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(15),dp(12),dp(15),dp(12));
+        b.setBackground(v2Shape(V2_SURFACE_LIGHT,V2_SURFACE,22,V2_LINE));
+        b.setOnClickListener(v->action.run());
+        return b;
+    }
+    private void v2AskByTyping(){
+        EditText question=new EditText(this);
+        question.setTextColor(V2_TEXT);
+        question.setHintTextColor(V2_DIM);
+        question.setHint("Ask Londe anything…");
+        question.setMinLines(2);
+        question.setPadding(dp(18),dp(15),dp(18),dp(15));
+        new AlertDialog.Builder(this).setTitle("Ask Londe")
+                .setView(question).setNegativeButton("Cancel",null)
+                .setPositiveButton("Ask",(d,w)->{
+                    String q=question.getText().toString().trim();
+                    if(q.isEmpty())return;
+                    aiScene="response";
+                    render();
+                    homeAsk(q);
+                }).show();
+    }
+
+    private void v2QuickTile(LinearLayout parent,String icon,String title,String subtitle,Runnable action){
+        LinearLayout tile=column();
+        tile.setPadding(dp(11),dp(12),dp(10),dp(13));
+        tile.setBackground(v2Shape(V2_SURFACE_LIGHT,V2_SURFACE,17,V2_LINE));
+        add(tile,text(icon,22,V2_MINT,true),0);
+        add(tile,text(title,13,V2_TEXT,true),9);
+        TextView sub=v2Caption(subtitle);sub.setMaxLines(2);add(tile,sub,3);
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(105),1);
+        if(parent.getChildCount()>0)lp.leftMargin=dp(7);
+        parent.addView(tile,lp);
+        tile.setOnClickListener(v->action.run());
+    }
     private void renderAiHome() {
+        main.setPadding(dp(4),dp(6),dp(4),dp(22));
+        main.setBackgroundColor(V2_BG);
+        if ("response".equals(aiScene)) {
+            add(main,v2Text("✦  Londe",27,true),10);
+            add(main,v2Caption("Your private assistant · response"),7);
+            LondeOrbView orb=new LondeOrbView(this);
+            orb.setState(replyBusy?"thinking":"speaking");
+            orb.setOnClickListener(v->openLonde());
+            main.addView(orb,new LinearLayout.LayoutParams(-1,dp(185)));
+            LinearLayout response=v2Panel();
+            londeStatus=text(wakeState,12,V2_MINT,true);
+            add(response,londeStatus,0);
+            londeReply=v2Text(recentReply,16,false);
+            londeReply.setLineSpacing(dp(4),1f);
+            add(response,londeReply,13);
+            add(main,response,7);
+            add(main,v2Pill("✦  Talk to Londe",this::openLonde),18);
+            add(main,v2Pill("⌨  Type another question",this::v2AskByTyping),9);
+            add(main,v2Pill("←  Back home",()->aiScene("hub")),9);
+            return;
+        }
+        if ("listening".equals(aiScene)) {
+            add(main,v2Text("Listening…",28,true),20);
+            LondeOrbView orb=new LondeOrbView(this);orb.setState("listening");
+            main.addView(orb,new LinearLayout.LayoutParams(-1,dp(280)));
+            add(main,v2Caption("Speak naturally. You remain in control."),9);
+            add(main,v2Pill("Cancel",()->aiScene("hub")),23);
+            return;
+        }
+        if ("standby".equals(aiScene)) { aiScene="hub"; }
+        LinearLayout header=row();
+        LinearLayout brand=column();
+        add(brand,text("✦  Londe",26,V2_TEXT,true),0);
+        add(brand,text("Q U I E T L A U N C H E R",10,V2_DIM,true),4);
+        header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
+        header.addView(v2Pill("⚙",()->show("settings")));
+        add(main,header,13);
+
+        int hour=java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
+        String greeting=hour<12?"Good morning":hour<17?"Good afternoon":"Good evening";
+        add(main,v2Text(greeting+",",29,true),32);
+        add(main,text("Londe is ready.",15,V2_DIM,false),4);
+        String modelState=LocalBrainModels.installed(this)
+                ? "●  Offline brain ready":"○  Download local brain";
+        TextView model=v2Pill(modelState,()->show("settings_ai"));
+        model.setTextColor(V2_MINT);
+        add(main,model,16);
+
+        LondeOrbView orb=new LondeOrbView(this);
+        orb.setState("ready");
+        orb.setContentDescription("Talk to Londe by voice");
+        orb.setOnClickListener(v->openLonde());
+        main.addView(orb,new LinearLayout.LayoutParams(-1,dp(247)));
+        TextView hint=v2Text("Say “Hey Londe”",18,true);
+        hint.setGravity(Gravity.CENTER);
+        add(main,hint,0);
+        TextView note=text(prefs.getBoolean("londe_wake_enabled",false)
+                ? "VOICE WAKE ENABLED  ·  TAP OR SPEAK"
+                : "TAP TO TALK  ·  WAKE WORD OFF",11,V2_DIM,true);
+        note.setGravity(Gravity.CENTER);
+        add(main,note,5);
+
+        LinearLayout commands=row();
+        TextView type=v2Pill("⌨  Type",this::v2AskByTyping);
+        commands.addView(type,new LinearLayout.LayoutParams(0,dp(49),1));
+        TextView mic=v2Pill("🎙  Talk",this::openLonde);
+        LinearLayout.LayoutParams mc=new LinearLayout.LayoutParams(0,dp(49),1);mc.leftMargin=dp(8);
+        commands.addView(mic,mc);
+        TextView all=v2Pill("▦  Apps",()->show("apps"));
+        LinearLayout.LayoutParams ac=new LinearLayout.LayoutParams(0,dp(49),1);ac.leftMargin=dp(8);
+        commands.addView(all,ac);
+        add(main,commands,22);
+
+        LinearLayout chips=row();
+        v2QuickTile(chips,"◈","On-device",LocalBrainModels.installed(this)
+                ? "Qwen3 local AI":"Model not installed",()->show("settings_ai"));
+        v2QuickTile(chips,"▤","Memory",LocalMemoryStore.enabled(this)
+                ? "Saved locally":"Off by default",()->show("settings_memory"));
+        v2QuickTile(chips,"▦","Tools","Apps & actions",()->show("settings_tools"));
+        add(main,chips,14);
+
+        LinearLayout glance=row();
+        LinearLayout today=v2Panel();
+        add(today,text("◷  TODAY",12,V2_MINT,true),0);
+        add(today,text(new SimpleDateFormat("EEE, d MMM",Locale.getDefault())
+                .format(new Date()),17,V2_TEXT,true),10);
+        add(today,v2Caption("View calendar"),5);
+        today.setOnClickListener(v->startSafe(
+                new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALENDAR)));
+        glance.addView(today,new LinearLayout.LayoutParams(0,dp(128),1));
+        LinearLayout focus=v2Panel();
+        add(focus,text("◎  FOCUS",12,V2_MINT,true),0);
+        add(focus,text(focusActive()?remainingFocus():"25 min",18,V2_TEXT,true),10);
+        add(focus,v2Caption(focusActive()?"In progress":"Start a session"),5);
+        focus.setOnClickListener(v->focusDialog());
+        LinearLayout.LayoutParams fc=new LinearLayout.LayoutParams(0,dp(128),1);fc.leftMargin=dp(9);
+        glance.addView(focus,fc);
+        add(main,glance,21);
+
+        LinearLayout recent=v2Panel();
+        add(recent,text("✧  RECENT ASSISTANT ACTIVITY",12,V2_MINT,true),0);
+        TextView summary=v2Caption(recentReply);
+        summary.setMaxLines(3);
+        add(recent,summary,9);
+        recent.setOnClickListener(v->aiScene("response"));
+        add(main,recent,10);
+
+        add(main,v2Text("Your essentials",17,true),24);
+        LinearLayout shortcut=row();
+        String[] icons={"▤","◷","♫","⌖","◎"};
+        String[] names={"Chats","Calendar","Music","Maps","Camera"};
+        String[] q={"Open WhatsApp","Open Calendar","Open Music","Open Maps","Open Camera"};
+        for(int i=0;i<icons.length;i++){
+            final String command=q[i];
+            LinearLayout tile=column();tile.setGravity(Gravity.CENTER);
+            TextView glyph=text(icons[i],23,V2_MINT,true);glyph.setGravity(Gravity.CENTER);
+            glyph.setBackground(v2Shape(V2_SURFACE_LIGHT,V2_SURFACE,17,V2_LINE));
+            tile.addView(glyph,new LinearLayout.LayoutParams(dp(51),dp(51)));
+            TextView label=text(names[i],11,V2_TEXT,false);label.setGravity(Gravity.CENTER);
+            add(tile,label,6);
+            shortcut.addView(tile,new LinearLayout.LayoutParams(0,dp(82),1));
+            tile.setOnClickListener(v->{
+                aiScene="response";render();homeAsk(command);
+            });
+        }
+        add(main,shortcut,13);
+        add(main,v2Pill("All apps  ↑",()->show("apps")),13);
+        add(main,v2Pill("Settings & tools  →",()->show("settings")),9);
+    }
+
+
         main.setPadding(dp(5),dp(2),dp(5),dp(24));
         main.setBackgroundColor(c("#041322"));
         if("standby".equals(aiScene)){
