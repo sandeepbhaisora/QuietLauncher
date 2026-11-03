@@ -53,7 +53,7 @@ final class LocalMemoryPolicy {
         if(input==null)return "other";
         String q=input.toLowerCase(Locale.ROOT);
         if(q.matches("(?s).*(?:java|kotlin|code|programming|backend|kafka|spring|"
-                + "android|github|api|database|software|develop|computer|model|llm|ai).*"))
+                + "android|github|api|database|software|develop|computer|model|llm|\\bai\\b).*"))
             return "technology";
         if(q.matches("(?s).*(?:travel|trip|hotel|tour|route|drive|mountain|flight|"
                 + "vacation|trek|destination).*"))return "travel";
