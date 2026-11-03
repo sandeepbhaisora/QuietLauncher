@@ -112,7 +112,8 @@ public final class MainActivity extends Activity {
     private boolean setupPromptScheduled;
     private long lastRefreshElapsed;
     private static final int REQ_WAKE_MIC=886;
-    private HomeWakeListener homeWake;
+    private OfflineWakePipeline homeWake;
+    private int homeWakeGeneration;
     private boolean foregroundHome;
     private TextView londeStatus, londeReply;
     private QuietFace assistantFace;
@@ -220,6 +221,7 @@ public final class MainActivity extends Activity {
             if (grants.length > 0 && grants[0] == PackageManager.PERMISSION_GRANTED) {
                 prefs.edit().putBoolean("londe_wake_enabled", true).apply();
                 LondeVoiceService.refreshWake();
+                handler.postDelayed(this::startWakeIfAllowed,650);
                 wakeStatus("HEY LONDE · OFFLINE DETECTOR ENABLED");
             } else {
                 prefs.edit().putBoolean("londe_wake_enabled", false).apply();
@@ -260,15 +262,18 @@ public final class MainActivity extends Activity {
         // Do not start Android SpeechRecognizer when the launcher becomes visible.
         if (initialResumePending) {
             initialResumePending = false;
+            handler.postDelayed(this::startWakeIfAllowed, 600);
             return;
         }
         if (SystemClock.elapsedRealtime() - lastRefreshElapsed >= 15000) refreshAsync();
         else if ("home".equals(page)) render();
+        handler.postDelayed(this::startWakeIfAllowed, 550);
     }
 
     @Override protected void onPause() {
         foregroundHome=false;
         stopWake();
+        LondeVoiceService.rearmWake();
         if(londeSpeech!=null)londeSpeech.stop();
         if(neuralVoice!=null)neuralVoice.stop();
         londeSpeaking=false;
@@ -388,7 +393,13 @@ public final class MainActivity extends Activity {
         add(view, r, 23);
     }
 
-    private void show(String next) { if (next.equals(page) && shell != null) return; if(!"home".equals(next))stopWake(); page = next; render(); }
+    private void show(String next) {
+        if (next.equals(page) && shell != null) return;
+        if (!"home".equals(next)) stopWake();
+        page = next;
+        render();
+        if("home".equals(next))handler.postDelayed(this::startWakeIfAllowed,400);
+    }
     private void render() {
         if (prefs == null) return;
         setPalette(); focusLive = null; clockLive = null;
@@ -835,6 +846,7 @@ public final class MainActivity extends Activity {
                     }
                     prefs.edit().putBoolean("londe_wake_enabled", true).apply();
                     LondeVoiceService.refreshWake();
+                    handler.postDelayed(this::startWakeIfAllowed,650);
                     if (android.os.Build.VERSION.SDK_INT >= 29) {
                         android.app.role.RoleManager roles = getSystemService(android.app.role.RoleManager.class);
                         if (roles != null && !roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)) {
@@ -968,14 +980,12 @@ public final class MainActivity extends Activity {
             }).setNegativeButton("Cancel",null).show();
     }
 
-    private void voiceCompleted(String id){
+    private void voiceCompleted(String id) {
         londeSpeaking=false;
-        if(id!=null && id.startsWith("londe-wake")){
-            if(homeWake!=null)homeWake.resumeAfterAcknowledgement();
-        } else if(id!=null && id.startsWith("londe-answer")){
-            handler.postDelayed(this::startWakeIfAllowed,450);
-        }
+        if(foregroundHome && "home".equals(page))
+            handler.postDelayed(this::startWakeIfAllowed,500);
     }
+
     private void acknowledgeWake(){
         wakeStatus("HEY LONDE DETECTED · SPEAK AFTER MY REPLY");
         recentReply="Londe: Haan, bolo! I'm listening for your question.";
@@ -994,17 +1004,78 @@ public final class MainActivity extends Activity {
         if(londeStatus!=null)londeStatus.setText(value);
         if(assistantFace!=null)assistantFace.invalidate();
     }
-    private void stopWake(){
-        if(homeWake!=null){homeWake.stop();homeWake=null;}
+    private void stopWake() {
+        homeWakeGeneration++;
+        if(homeWake!=null) {
+            homeWake.stop();
+            homeWake=null;
+        }
         wakeStatus("VOICE WAKE OFF");
     }
-    private void startWakeIfAllowed(){
-        // Android SpeechRecognizer is a transcription engine, not a hotword detector.
-        // Never launch it automatically on Home. Re-enable only after adding a
-        // dedicated local keyword engine with a verified wake callback.
-        wakeStatus(prefs.getBoolean("londe_wake_enabled", false)
-                ? "HEY LONDE · SYSTEM ASSISTANT LISTENING" : "VOICE WAKE OFF");
+
+    /** Foreground-only native hotword spotting on the launcher itself. */
+    private void startWakeIfAllowed() {
+        if(!foregroundHome || !"home".equals(page) || isFinishing() || isDestroyed()
+                || replyBusy || londeSpeaking || homeWake != null) return;
+        if(!prefs.getBoolean("londe_wake_enabled",false)) {
+            wakeStatus("VOICE WAKE OFF");
+            return;
+        }
+        if(!LondeKeywordDetector.available(this)) {
+            wakeStatus("HEY LONDE · DOWNLOAD WAKE MODEL");
+            return;
+        }
+        if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED) {
+            wakeStatus("HEY LONDE · MICROPHONE PERMISSION REQUIRED");
+            return;
+        }
+        final int generation=++homeWakeGeneration;
+        LondeVoiceService.pauseWakeForSession();
+        wakeStatus("HEY LONDE · LOADING LOCAL DETECTOR");
+        background.execute(()-> {
+            OfflineWakePipeline.Detector detector;
+            try {
+                detector=new LondeKeywordDetector(this);
+            }catch(Throwable error) {
+                android.util.Log.e("QuietWake","Home keyword model initialization failed",error);
+                handler.post(()->{
+                    if(generation==homeWakeGeneration && foregroundHome)
+                        wakeStatus("HEY LONDE · MODEL INITIALIZATION FAILED");
+                });
+                return;
+            }
+            handler.postDelayed(()->{
+                if(generation!=homeWakeGeneration || !foregroundHome ||
+                        !"home".equals(page) || isFinishing() || isDestroyed()) {
+                    detector.close();
+                    return;
+                }
+                OfflineWakePipeline pipeline=new OfflineWakePipeline(this,
+                        new OfflineWakePipeline.Events(){
+                            @Override public void onWake() {
+                                homeWake=null;
+                                ++homeWakeGeneration;
+                                wakeStatus("HEY LONDE · DETECTED");
+                                // The assistant owns transcription after keyword detection.
+                                openLonde();
+                            }
+                            @Override public void onError(String reason) {
+                                homeWake=null;
+                                android.util.Log.w("QuietWake",reason);
+                                wakeStatus("HEY LONDE · " + reason);
+                            }
+                        });
+                if(pipeline.start(detector)){
+                    homeWake=pipeline;
+                    wakeStatus("HEY LONDE · LISTENING LOCALLY");
+                }else{
+                    detector.close();
+                    wakeStatus("HEY LONDE · MICROPHONE UNAVAILABLE");
+                }
+            },350);
+        });
     }
+
     private void homeAsk(String request){
         String q=request==null?"":request.trim();
         if(q.isEmpty())return;
