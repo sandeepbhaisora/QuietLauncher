@@ -1016,7 +1016,7 @@ public final class MainActivity extends Activity {
             String response = LocalFirstRouter.localAnswer(routing,
                     System.currentTimeMillis(),
                     prefs.getLong("focusUntil", 0L), Locale.getDefault());
-            recentReply = "You: " + q + "\\n\\nLonde: " + response;
+            recentReply = "You: " + q + "\\n\\nSOURCE: LOCAL PHONE TOOLS\\n\\nLonde: " + response;
             if (londeReply != null) londeReply.setText(recentReply);
             wakeStatus("ANSWERED OFFLINE");
             if ("response".equals(aiScene) && "home".equals(page)) render();
@@ -1063,7 +1063,7 @@ public final class MainActivity extends Activity {
                     homeContext.add(new LondeClient.Turn("user", q));
                     homeContext.add(new LondeClient.Turn("assistant", text));
                     while (homeContext.size() > 18) homeContext.remove(0);
-                    recentReply = "You: " + q + "\\n\\nLonde: " + text;
+                    recentReply = "You: " + q + "\\n\\nSOURCE: QWEN3 0.6B · ON-DEVICE\\n\\nLonde: " + text;
                     if (londeReply != null) londeReply.setText(recentReply);
                     wakeStatus(String.format(Locale.ROOT, "OFFLINE QWEN3 · %.1f TOK/S", speed));
                     if ("response".equals(aiScene) && "home".equals(page)) render();
@@ -1082,7 +1082,7 @@ public final class MainActivity extends Activity {
 
     private void homeAskFallback(String q) {
         if (!CloudAvailability.online(this)) {
-            recentReply = "You: " + q + "\\n\\nLonde: " + LocalReplyPolicy.offlineMessage();
+            recentReply = "You: " + q + "\\n\\nSOURCE: QWEN3 · OFFLINE FALLBACK\\n\\nLonde: " + LocalReplyPolicy.offlineMessage();
             if (londeReply != null) londeReply.setText(recentReply);
             wakeStatus("OFFLINE · NO CHATGPT REQUEST");
             speakLonde(LocalReplyPolicy.offlineMessage(),
@@ -1121,7 +1121,7 @@ public final class MainActivity extends Activity {
                     if(isFinishing()||isDestroyed())return;
                     assistantModel=result.model;replyBusy=false;
                     homeContext.add(new LondeClient.Turn("assistant",result.text));
-                    recentReply="You: "+q+"\\n\\nLonde: "+result.text;
+                    recentReply="You: "+q+"\\n\\nSOURCE: CHATGPT · ONLINE\\n\\nLonde: "+result.text;
                     if(londeReply!=null)londeReply.setText(recentReply);
                     wakeStatus("LONDE REPLIED");
                     if ("response".equals(aiScene) && "home".equals(page)) render();
