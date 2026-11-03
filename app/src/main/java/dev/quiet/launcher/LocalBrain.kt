@@ -40,6 +40,14 @@ object LocalBrain {
         val app = context.applicationContext
         worker.launch {
             try {
+                val safety = app.getSharedPreferences("quiet_local_brain", Context.MODE_PRIVATE)
+                if (safety.getBoolean("inference_in_progress", false)) {
+                    app.getSharedPreferences("quiet_local_v1", Context.MODE_PRIVATE)
+                        .edit().putBoolean("londe_local_brain_enabled", false).commit()
+                    safety.edit().remove("inference_in_progress").commit()
+                    main.post { callback.onError("Previous local model session ended unexpectedly; local AI disabled for safety. Re-enable in Settings to retry.") }
+                    return@launch
+                }
                 if (!LocalBrainModels.installed(app)) {
                     main.post { callback.onError("Download the Qwen3 model in Quiet Settings first.") }
                     return@launch
@@ -52,6 +60,10 @@ object LocalBrain {
                     return@launch
                 }
                 val result = mutex.withLock {
+                    // Persistent guard also catches native SIGABRT/out-of-memory
+                    // process death, which bypasses Kotlin/Java exception handlers.
+                    safety.edit().putBoolean("inference_in_progress", true).commit()
+                    try {
                     if (model == null) {
                         val config = LlamaConfig(
                             contextSize = 2048,
@@ -81,6 +93,9 @@ object LocalBrain {
                             "Earlier turns for context:\n" + recentContext.takeLast(600) + "\n") +
                             "Current user request: " + question.take(750)
                     Llama.complete(model!!, fullQuestion, instructions, 180)
+                    } finally {
+                        safety.edit().remove("inference_in_progress").commit()
+                    }
                 }
                 val body = result.text.trim().replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
                 val start = body.indexOf('{')
