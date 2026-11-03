@@ -36,6 +36,29 @@ final class LondeKeywordDetector implements OfflineWakePipeline.Detector {
         if (!available(context))
             throw new IllegalStateException("Install Hey Londe detector in Quiet Settings first");
         File folder=OptionalModelPacks.modelDirectory(context,OptionalModelPacks.Pack.WAKE);
+        // Refresh the tiny wake phrase list even when ONNX weights were
+        // downloaded with an earlier release. Otherwise existing installs
+        // keep the original single, less-sensitive HEY LONDE spelling.
+        File phrases = new File(folder, "keywords.txt");
+        try (InputStream source = context.getAssets().open(ASSET_DIR + "keywords.txt")) {
+            java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int n;
+            while ((n = source.read(buffer)) != -1) output.write(buffer, 0, n);
+            byte[] updated = output.toByteArray();
+            byte[] previous = phrases.isFile()
+                    ? java.nio.file.Files.readAllBytes(phrases.toPath()) : new byte[0];
+            if (!java.util.Arrays.equals(updated, previous)) {
+                File temp = new File(folder, "keywords.txt.next");
+                try (FileOutputStream destination = new FileOutputStream(temp)) {
+                    destination.write(updated);
+                    destination.getFD().sync();
+                }
+                if (!temp.renameTo(phrases))
+                    throw new java.io.IOException("Failed to update wake phrases");
+            }
+        }
+
         OnlineTransducerModelConfig transducer = new OnlineTransducerModelConfig();
         transducer.setEncoder(new File(folder, FILES[0]).getAbsolutePath());
         transducer.setDecoder(new File(folder, FILES[1]).getAbsolutePath());
@@ -52,8 +75,8 @@ final class LondeKeywordDetector implements OfflineWakePipeline.Detector {
         config.setFeatConfig(features);
         config.setModelConfig(model);
         config.setKeywordsFile(new File(folder, FILES[4]).getAbsolutePath());
-        config.setKeywordsThreshold(0.35f);
-        config.setKeywordsScore(1.5f);
+        config.setKeywordsThreshold(0.28f);
+        config.setKeywordsScore(1.8f);
         config.setNumTrailingBlanks(2);
         kws = new KeywordSpotter(null, config);
         stream = kws.createStream("");

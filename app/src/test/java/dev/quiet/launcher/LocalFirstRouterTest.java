@@ -14,6 +14,13 @@ public final class LocalFirstRouterTest {
     }
     public static void main(String[] args) {
         expect("What time is it?", LocalFirstRouter.Kind.LOCAL_ANSWER);
+        expect("abe time kya ho raha hai pooch raha hun main", LocalFirstRouter.Kind.LOCAL_ANSWER);
+        expect("bhai abhi time kya hai batao", LocalFirstRouter.Kind.LOCAL_ANSWER);
+        expect("time kya ho raha hai", LocalFirstRouter.Kind.LOCAL_ANSWER);
+        expect("abhi kitne baje hain bhai", LocalFirstRouter.Kind.LOCAL_ANSWER);
+        expect("what is the time complexity of binary search", LocalFirstRouter.Kind.CHATGPT);
+        expect("explain time series databases", LocalFirstRouter.Kind.CHATGPT);
+
         expect("what is today's date?", LocalFirstRouter.Kind.LOCAL_ANSWER);
         expect("अभी कितने बजे हैं?", LocalFirstRouter.Kind.LOCAL_ANSWER);
         expect("focus status", LocalFirstRouter.Kind.LOCAL_ANSWER);

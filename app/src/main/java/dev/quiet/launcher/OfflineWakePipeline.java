@@ -25,6 +25,8 @@ final class OfflineWakePipeline {
     interface Events {
         void onWake();
         void onError(String reason);
+        /** Foreground diagnostic only; this is microphone energy, NOT recognition. */
+        default void onAudioLevel(int percent) {}
     }
     private final Context context;
     private final Events events;
@@ -63,9 +65,23 @@ final class OfflineWakePipeline {
                 throw new IllegalStateException("Microphone unavailable");
             microphone.startRecording();
             short[] chunk = new short[1600];
+            long lastLevel = android.os.SystemClock.elapsedRealtime();
+            int maxPeak = 0;
             while (running) {
                 int size = microphone.read(chunk, 0, chunk.length);
                 if (size < 0) throw new IllegalStateException("Microphone read: " + size);
+                if (size > 0) {
+                    int peak = 0;
+                    for(int i=0;i<size;i++)peak=Math.max(peak,Math.abs((int)chunk[i]));
+                    maxPeak=Math.max(maxPeak,peak);
+                    long now=android.os.SystemClock.elapsedRealtime();
+                    if(now-lastLevel>=1000) {
+                        final int level=Math.min(100,maxPeak*100/32768);
+                        main.post(()->{if(running)events.onAudioLevel(level);});
+                        maxPeak=0;
+                        lastLevel=now;
+                    }
+                }
                 if (size > 0 && detector.accept(chunk, size)) {
                     running = false;
                     // Release the mic before starting command transcription.

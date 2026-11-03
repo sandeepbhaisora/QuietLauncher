@@ -61,7 +61,9 @@ final class LocalFirstRouter {
     private static boolean hasRomanHindi(String q) {
         return q.contains("kitne baje") || q.contains("samay kya")
                 || q.contains("aaj ki") || q.contains("aaj ka")
-                || q.contains("kitna bacha") || q.contains("kitni der");
+                || q.contains("kitna bacha") || q.contains("kitni der")
+                || q.contains("time kya") || q.contains("time bata") || q.contains("abhi time")
+                || q.contains("kitna time") || q.contains("kitni time");
     }
 
     private static boolean isTimeQuestion(String q) {
@@ -71,7 +73,21 @@ final class LocalFirstRouter {
                 || q.equals("tell me the time") || q.equals("what time is it now")
                 || q.equals("kitne baje hain") || q.equals("abhi kitne baje hain")
                 || q.equals("samay kya hai") || q.contains("अभी कितने बजे")
-                || q.equals("कितने बजे हैं") || q.equals("समय क्या है");
+                || q.equals("कितने बजे हैं") || q.equals("समय क्या है")
+                || isConversationalClockQuestion(q);
+    }
+
+    /** Recognized Hindi/Hinglish often includes filler: "abe time kya ho raha hai...". */
+    /** Handles conversational Hindi/Hinglish without catching time complexity. */
+    private static boolean isConversationalClockQuestion(String q) {
+        if (q.matches("(?s).*(time complexity|time zone|time travel|time management|"
+                + "time machine|time series|run time|runtime|execution time|"
+                + "what is time|explain time|define time).*"))
+            return false;
+        boolean mentionsClock = q.matches("(?s).*(\\btime\\b|\\bsamay\\b|\\bbaje\\b|समय|वक़्त|वक्त|बजे).*");
+        boolean asksNow = q.matches("(?s).*(\\bkya\\b|\\bkitn[aei]\\b|\\babhi\\b|\\bnow\\b|"
+                + "\\bbata\\b|\\bbaje\\b|\\bbaj[ae]\\b|क्या|कितने|बजे|कितना).*");
+        return mentionsClock && asksNow;
     }
 
     private static boolean isDateQuestion(String q) {
