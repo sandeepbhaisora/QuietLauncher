@@ -84,7 +84,7 @@ final class LocalFirstRouter {
                 + "time machine|time series|run time|runtime|execution time|"
                 + "what is time|explain time|define time).*"))
             return false;
-        boolean mentionsClock = q.matches("(?s).*(\\btime\\b|\\bsamay\\b|समय|वक़्त|वक्त|बजे).*");
+        boolean mentionsClock = q.matches("(?s).*(\\btime\\b|\\bsamay\\b|\\bbaje\\b|समय|वक़्त|वक्त|बजे).*");
         boolean asksNow = q.matches("(?s).*(\\bkya\\b|\\bkitn[aei]\\b|\\babhi\\b|\\bnow\\b|"
                 + "\\bbata\\b|\\bbaje\\b|\\bbaj[ae]\\b|क्या|कितने|बजे|कितना).*");
         return mentionsClock && asksNow;
