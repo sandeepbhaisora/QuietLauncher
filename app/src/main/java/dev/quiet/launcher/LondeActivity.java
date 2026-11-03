@@ -196,7 +196,7 @@ public final class LondeActivity extends Activity {
                 Voice v=voices.get(index);
                 speech.setVoice(v);
                 getSharedPreferences("londe_voice_v1",MODE_PRIVATE).edit().putString("tts_voice",v.getName()).apply();
-                if(activeSession)listen();
+                if(activeSession)stopListening();
                 say("Hi, I'm Londe. How does this voice sound?");
             }).setNegativeButton("Cancel",null).show();
     }
@@ -607,7 +607,7 @@ public final class LondeActivity extends Activity {
                             return;
                         }
                         setPhase(Phase.READY, reason + " · RETRYING");
-                        ui.postDelayed(this::startRecognition, 1000);
+                        ui.postDelayed(LondeActivity.this::startRecognition, 1000);
                     }
                     @Override public void onResults(Bundle b) {
                         recognizerRunning = false;
