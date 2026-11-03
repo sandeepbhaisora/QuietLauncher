@@ -14,7 +14,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
-import java.util.Locale
 
 /**
  * Actual local GGUF inference via llama.cpp, not a keyword/heuristic answerer.
@@ -44,13 +43,6 @@ object LocalBrain {
                 val safety = app.getSharedPreferences("quiet_local_brain", Context.MODE_PRIVATE)
                 if (!LocalBrainModels.installed(app)) {
                     main.post { callback.onError("Download the Qwen3 model in Quiet Settings first.") }
-                    return@launch
-                }
-                // Do not pretend a 0.6B offline model can know live/current facts.
-                val lower = question.lowercase(Locale.ROOT)
-                if (Regex("\\b(today|latest|currently|news|weather|score|stock price|live|recent|tomorrow)\\b")
-                        .containsMatchIn(lower) && !lower.contains("what day is")) {
-                    main.post { callback.onResult("", null, true, 0f) }
                     return@launch
                 }
                 val result = mutex.withLock {
@@ -113,7 +105,7 @@ object LocalBrain {
                     val plain = body.removePrefix("```").removePrefix("json").trim()
                     if (plain.length in 6..650 && !plain.contains("<think")
                         && !plain.contains("assistant:") && !plain.startsWith("{")) {
-                        main.post { callback.onResult(plain, null, false, result.tokensPerSecond) }
+                        main.post { callback.onResult(plain, null, !LocalReplyPolicy.usableLocalAnswer(question, plain), result.tokensPerSecond) }
                     } else {
                         main.post { callback.onResult("", null, true, result.tokensPerSecond) }
                     }
@@ -124,7 +116,7 @@ object LocalBrain {
                     "answer" -> {
                         val answer = json.optString("text").trim().take(700)
                         main.post {
-                            callback.onResult(answer, null, answer.length < 3,
+                            callback.onResult(answer, null, !LocalReplyPolicy.usableLocalAnswer(question, answer),
                                 result.tokensPerSecond)
                         }
                     }
