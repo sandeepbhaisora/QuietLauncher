@@ -1,6 +1,7 @@
 package dev.quiet.launcher;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
@@ -19,7 +20,9 @@ import com.k2fsa.sherpa.onnx.OfflineTtsSupertonicModelConfig;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -40,6 +43,10 @@ final class LocalNeuralVoice {
 
     private static final String TAG = "QuietNeuralVoice";
     private static final String ASSET_DIR = "quiet_voice/";
+    private static final String PREF = "londe_voice_v1";
+    private static final String NATIVE_IN_PROGRESS = "neural_native_in_progress";
+    private static int activeNativeCalls = 0;
+    private static boolean checkedPreviousProcess = false;
     private static final String[] FILES = {
         "duration_predictor.int8.onnx", "text_encoder.int8.onnx",
         "vector_estimator.int8.onnx", "vocoder.int8.onnx",
@@ -56,6 +63,56 @@ final class LocalNeuralVoice {
 
     LocalNeuralVoice(Context context) {
         this.context = context.getApplicationContext();
+        // Native SIGSEGV/SIGABRT escapes Java exception handlers. If the
+        // previous process died during inference, restore a usable TTS mode.
+        synchronized (LocalNeuralVoice.class) {
+            if (!checkedPreviousProcess) {
+                SharedPreferences prefs = this.context.getSharedPreferences(
+                        PREF, Context.MODE_PRIVATE);
+                if (prefs.getBoolean(NATIVE_IN_PROGRESS, false)) {
+                    prefs.edit().putString("voice_mode", "android")
+                            .putBoolean("neural_crash_warning_pending", true)
+                            .remove(NATIVE_IN_PROGRESS).commit();
+                    Log.e(TAG, "Native inference was interrupted in previous process; reverting to Android voice");
+                }
+                checkedPreviousProcess = true;
+            }
+        }
+    }
+
+    private void nativeEnter() {
+        synchronized (LocalNeuralVoice.class) {
+            if (++activeNativeCalls == 1) {
+                context.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit()
+                        .putBoolean(NATIVE_IN_PROGRESS, true).commit();
+            }
+        }
+    }
+
+    private void nativeExit() {
+        synchronized (LocalNeuralVoice.class) {
+            if (activeNativeCalls > 0 && --activeNativeCalls == 0) {
+                context.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit()
+                        .remove(NATIVE_IN_PROGRESS).commit();
+            }
+        }
+    }
+
+    // Short synthesis requests reduce peak memory and let responses be interrupted.
+    private static List<String> chunks(String text) {
+        List<String> parts = new ArrayList<>();
+        int offset = 0;
+        while (offset < text.length()) {
+            int end = Math.min(text.length(), offset + 150);
+            if (end < text.length()) {
+                int boundary = text.lastIndexOf(' ', end);
+                if (boundary > offset + 45) end = boundary + 1;
+            }
+            String part = text.substring(offset, end).trim();
+            if (!part.isEmpty()) parts.add(part);
+            offset = end;
+        }
+        return parts;
     }
 
     static boolean modelPackaged(Context context) {
@@ -75,37 +132,49 @@ final class LocalNeuralVoice {
             return;
         }
         worker.execute(() -> {
+            boolean entered = false;
             try {
                 if (closed || request != sequence.get()) return;
+                nativeEnter();
+                entered = true;
+                Log.i(TAG, "Beginning native speech inference");
                 ensureReady();
                 if (closed || request != sequence.get()) return;
 
                 boolean hindi = HindiSpeech.containsDevanagari(clean)
                         || clean.matches("(?i)(?s).*\\b(haan|bhai|bolo|theek hai|shukriya)\\b.*");
-                String text = hindi ? HindiSpeech.prepare(clean, Locale.forLanguageTag("hi-IN")) : clean;
+                String spoken = hindi ? HindiSpeech.prepare(clean, Locale.forLanguageTag("hi-IN")) : clean;
                 GenerationConfig config = new GenerationConfig();
                 config.setSid(6);
                 config.setSpeed(1.0f);
-                config.setNumSteps(8);
+                config.setNumSteps(5);
                 Map<String, String> extra = new HashMap<>();
                 extra.put("lang", hindi ? "hi" : "en");
                 config.setExtra(extra);
 
-                GeneratedAudio audio = tts.generateWithConfigAndCallback(
-                        text, config, samples -> request == sequence.get() && !closed ? 1 : 0);
-                if (closed || request != sequence.get()) return;
-                float[] samples = audio.getSamples();
-                int sampleRate = audio.getSampleRate();
-                if (samples == null || samples.length == 0 || sampleRate <= 0) {
-                    throw new IllegalStateException("Neural model returned no audio");
+                for (String part : chunks(spoken)) {
+                    if (closed || request != sequence.get()) return;
+                    long started = android.os.SystemClock.elapsedRealtime();
+                    // No JNI callback: callback API is implicated in Android crashes.
+                    GeneratedAudio audio = tts.generateWithConfig(part, config);
+                    Log.i(TAG, "Native synthesis segment took " +
+                            (android.os.SystemClock.elapsedRealtime() - started) + " ms");
+                    if (closed || request != sequence.get()) return;
+                    float[] samples = audio.getSamples();
+                    int sampleRate = audio.getSampleRate();
+                    if (samples == null || samples.length == 0 || sampleRate <= 0) {
+                        throw new IllegalStateException("Neural model returned no audio");
+                    }
+                    playPcm(samples, sampleRate, request);
                 }
-                playPcm(samples, sampleRate, request);
                 if (!closed && request == sequence.get()) deliver(listener, true, null);
             } catch (Throwable ex) {
-                Log.e(TAG, "Neural speech failed", ex);
+                Log.e(TAG, "Local neural speech failed", ex);
                 if (!closed && request == sequence.get()) {
                     deliver(listener, false, "Local voice failed: " + ex.getClass().getSimpleName());
                 }
+            } finally {
+                if (entered) nativeExit();
             }
         });
     }
