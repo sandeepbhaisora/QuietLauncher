@@ -89,6 +89,13 @@ jobs:
             app/src/main/java/dev/quiet/launcher/SpokenOnlineConsent.java \
             app/src/test/java/dev/quiet/launcher/SpokenOnlineConsentTest.java
           java -cp /tmp/quiet-spoken-consent dev.quiet.launcher.SpokenOnlineConsentTest
+      - name: Test typed offline tool security policy (JVM)
+        run: |
+          mkdir -p /tmp/quiet-tool-tests
+          javac -encoding UTF-8 -d /tmp/quiet-tool-tests \
+            app/src/main/java/dev/quiet/launcher/LocalToolPolicy.java \
+            app/src/test/java/dev/quiet/launcher/LocalToolPolicyTest.java
+          java -cp /tmp/quiet-tool-tests dev.quiet.launcher.LocalToolPolicyTest
       - name: Test Qwen-first fallback policy (JVM)
         run: |
           mkdir -p /tmp/quiet-qwen-tests
