@@ -760,12 +760,59 @@ public final class MainActivity extends Activity {
         dialog.show();
     }
 
+    private void manageOptionalPack(OptionalModelPacks.Pack pack) {
+        String status=OptionalModelPacks.status(this,pack);
+        if(OptionalModelPacks.installed(this,pack)) {
+            new AlertDialog.Builder(this).setTitle(pack.title)
+                    .setMessage("Installed and available offline. " +
+                            (pack==OptionalModelPacks.Pack.VOICE
+                                ? "The natural voice works with no internet. Choose it under Londe voice engine."
+                                : "Enable Hey Londe from this settings page. Samsung still controls background microphone access."))
+                    .setPositiveButton("OK",null).show();
+            return;
+        }
+        boolean completed=status.startsWith("Downloaded");
+        new AlertDialog.Builder(this).setTitle(pack.title)
+                .setMessage(status+"\\n\\nThe model downloads once over Wi-Fi. Quiet will install it into private storage, where it works offline. This reduces the size of the APK.")
+                .setPositiveButton(completed?"Install model":"Download model",(d,w)->{
+                    if(completed) {
+                        Toast.makeText(this,"Installing model…",Toast.LENGTH_LONG).show();
+                        background.execute(()->{
+                            try {
+                                OptionalModelPacks.install(this,pack);
+                                handler.post(()->{
+                                    if(isFinishing()||isDestroyed())return;
+                                    Toast.makeText(this,pack.title+" installed",Toast.LENGTH_LONG).show();
+                                    if(pack==OptionalModelPacks.Pack.WAKE)LondeVoiceService.refreshWake();
+                                    show("settings");
+                                });
+                            }catch(Exception ex){
+                                android.util.Log.e("OptionalModelPacks","Pack installation failed",ex);
+                                handler.post(()->{
+                                    if(!isFinishing()&&!isDestroyed())
+                                        new AlertDialog.Builder(this).setTitle("Model installation failed")
+                                                .setMessage(ex.getMessage()).setPositiveButton("OK",null).show();
+                                });
+                            }
+                        });
+                    } else {
+                        try {
+                            OptionalModelPacks.download(this,pack);
+                            Toast.makeText(this,"Download queued. Return here to check progress and install.",Toast.LENGTH_LONG).show();
+                            show("settings");
+                        } catch(Exception ex) {
+                            Toast.makeText(this,ex.getMessage(),Toast.LENGTH_LONG).show();
+                        }
+                    }
+                })
+                .setNeutralButton("Refresh status",(d,w)->manageOptionalPack(pack))
+                .setNegativeButton("Cancel",null).show();
+    }
+
     private void configureWake() {
         boolean enabled = prefs.getBoolean("londe_wake_enabled", false);
         if (!LondeKeywordDetector.available(this)) {
-            new AlertDialog.Builder(this).setTitle("Offline wake model missing")
-                    .setMessage("The bundled Hey Londe keyword model was not found in this APK.")
-                    .setPositiveButton("OK", null).show();
+            manageOptionalPack(OptionalModelPacks.Pack.WAKE);
             return;
         }
         if (enabled) {
@@ -832,7 +879,7 @@ public final class MainActivity extends Activity {
     }
     private void speakLonde(String message, String utteranceId) {
         String text = message == null ? "" : message;
-        if (useLocalNeuralVoice()) {
+        if (useLocalNeuralVoice() && LocalNeuralVoice.modelPackaged(this)) {
             londeSpeaking = true;
             neuralVoice.speak(text, (success, error) -> {
                 if (!success) {
@@ -856,11 +903,14 @@ public final class MainActivity extends Activity {
     }
     private void configureLondeVoice(){
         new AlertDialog.Builder(this).setTitle("Londe speech output")
-            .setMessage("Offline Supertonic 3 neural voice runs inside Quiet on your phone, no API key. Android voice is an optional fallback. First synthesis loads the model.")
+            .setMessage("Supertonic 3 is a downloadable offline voice. Once installed it needs no connection; otherwise use Android voice. Status: " + OptionalModelPacks.status(this,OptionalModelPacks.Pack.VOICE))
             .setPositiveButton("Use offline neural voice", (d,w) -> {
+                if(!LocalNeuralVoice.modelPackaged(this)){
+                    manageOptionalPack(OptionalModelPacks.Pack.VOICE);
+                    return;
+                }
                 setVoiceMode(true);
-                Toast.makeText(this, LocalNeuralVoice.modelPackaged(this)
-                        ? "Offline neural voice selected" : "Neural model assets missing from APK", Toast.LENGTH_LONG).show();
+                Toast.makeText(this,"Supertonic offline voice selected",Toast.LENGTH_LONG).show();
             })
             .setNeutralButton("Use Android voice", (d,w) -> {
                 setVoiceMode(false);
@@ -1977,6 +2027,12 @@ public final class MainActivity extends Activity {
         setting("Classic home", "Original dashboard and essential app tiles", () -> show("classic"));
         setting("Intent-first home", "Default home · local commands and recommendations", () -> show("home"));
         section(main, "LONDE ASSISTANT", null, null);
+        setting("Download natural voice · Supertonic",
+                OptionalModelPacks.status(this,OptionalModelPacks.Pack.VOICE),
+                () -> manageOptionalPack(OptionalModelPacks.Pack.VOICE));
+        setting("Download Hey Londe detector",
+                OptionalModelPacks.status(this,OptionalModelPacks.Pack.WAKE),
+                () -> manageOptionalPack(OptionalModelPacks.Pack.WAKE));
         setting("Voice wake: Hey Londe", prefs.getBoolean("londe_wake_enabled",false)
             ? "On · offline keyword spotter" : "Off · enable local Hey Londe detector",
             () -> configureWake());
