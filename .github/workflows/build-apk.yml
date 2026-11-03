@@ -86,6 +86,8 @@ jobs:
           echo "QUIET_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
       - name: Set increasing build version
         run: echo "QUIET_VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+      - name: Install native offline Hindi neural voice runtime and model
+        run: bash scripts/install_local_voice.sh
       - name: Assemble installable debug APK
         run: gradle --no-daemon :app:assembleDebug
       - name: Delete temporary keystore
