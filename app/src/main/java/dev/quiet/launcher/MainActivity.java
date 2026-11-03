@@ -1121,7 +1121,7 @@ public final class MainActivity extends Activity {
                     if(isFinishing()||isDestroyed())return;
                     assistantModel=result.model;replyBusy=false;
                     homeContext.add(new LondeClient.Turn("assistant",result.text));
-                    recentReply="You: "+q+"\\n\\nSOURCE: CHATGPT · ONLINE\\n\\nLonde: "+result.text;
+                    recentReply="You: "+q+"\\n\\nSOURCE: CHATGPT · "+result.model+" · ONLINE\\n\\nLonde: "+result.text;
                     if(londeReply!=null)londeReply.setText(recentReply);
                     wakeStatus("LONDE REPLIED");
                     if ("response".equals(aiScene) && "home".equals(page)) render();
