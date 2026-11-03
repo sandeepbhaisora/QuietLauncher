@@ -1425,7 +1425,7 @@ public final class MainActivity extends Activity {
                     homeContext.add(new LondeClient.Turn("user", q));
                     homeContext.add(new LondeClient.Turn("assistant", text));
                     while (homeContext.size() > 18) homeContext.remove(0);
-                    recentReply = "You: " + q + "\n\nSOURCE: " + LocalBrainModelCatalog.label(this) + " · ON-DEVICE\n\nLonde: " + text;
+                    recentReply = "You: " + q + "\n\nSOURCE: " + LocalBrainModelCatalog.label(MainActivity.this) + " · ON-DEVICE\n\nLonde: " + text;
                     if (londeReply != null) londeReply.setText(recentReply);
                     wakeStatus(String.format(Locale.ROOT, "OFFLINE QWEN3 · %.1f TOK/S", speed));
                     if ("response".equals(aiScene) && "home".equals(page)) render();
