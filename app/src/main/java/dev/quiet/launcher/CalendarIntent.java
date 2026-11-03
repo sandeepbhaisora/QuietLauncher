@@ -12,6 +12,7 @@ final class CalendarIntent {
             return false;
         return q.matches("(?s).*(\\b(my |any |have |scheduled |upcoming |today'?s |tomorrow'?s )"
                 + "(meetings?|appointments?|events?|calendar|schedule)\\b).*")
+                || q.matches("(?s).*(\\bwhat (?:meetings?|appointments?|events?) do i have\\b).*")
                 || q.matches("(?s).*(\\bdo i have (?:any |to )?(?:meetings?|appointments?|"
                 + "go anywhere|be somewhere|travel|go out)\\b).*")
                 || q.matches("(?s).*(\\bwhere (?:do i|am i) (?:have to|need to|going to) go\\b).*")
