@@ -9,14 +9,14 @@ val quietKeystorePath = System.getenv("QUIET_KEYSTORE_FILE")
 
 android {
     namespace = "dev.quiet.launcher"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "dev.quiet.launcher"
         minSdk = 28
         // Target Samsung/modern Android arm64 so the bundled neural runtime stays smaller.
         ndk { abiFilters += listOf("arm64-v8a") }
-        targetSdk = 35
+        targetSdk = 36
         versionCode = System.getenv("QUIET_VERSION_CODE")?.toIntOrNull() ?: 28
         versionName = "0.9.6"
     }
@@ -38,7 +38,13 @@ android {
                 signingConfig = signingConfigs.getByName("quietPersistent")
             }
         }
-        getByName("release") { isMinifyEnabled = false }
+        getByName("release") {
+            isMinifyEnabled = false
+            if (!quietKeystorePath.isNullOrBlank()) {
+                // Play App Signing uses this certificate as the upload key.
+                signingConfig = signingConfigs.getByName("quietPersistent")
+            }
+        }
     }
 
     androidResources { noCompress += listOf("onnx", "bin") }

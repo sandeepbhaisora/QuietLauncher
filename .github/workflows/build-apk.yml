@@ -23,7 +23,7 @@ jobs:
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           if [ ! -x "$SDKM" ]; then SDKM="$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"; fi
           yes | "$SDKM" --licenses >/dev/null || true
-          "$SDKM" 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+          "$SDKM" 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -159,6 +159,19 @@ jobs:
           name: Quiet-standard-apk
           path: ${{ runner.temp }}/quiet-standard/Quiet-standard.apk
 
+      - name: Build release Android App Bundle for Play internal testing
+        run: |
+          gradle --no-daemon :app:bundleRelease
+          test -s app/build/outputs/bundle/release/app-release.aab
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            jarsigner -verify app/build/outputs/bundle/release/app-release.aab | grep -q 'jar verified'
+          fi
+      - name: Upload Play internal testing AAB
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quiet-Play-internal-AAB
+          path: app/build/outputs/bundle/release/app-release.aab
       - name: Delete temporary keystore
         if: always()
         run: rm -rf "$RUNNER_TEMP/quiet-signing"
