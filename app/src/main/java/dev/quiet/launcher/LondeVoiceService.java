@@ -103,6 +103,11 @@ public final class LondeVoiceService extends VoiceInteractionService {
         });
     }
 
+    static void pauseWakeForSession() {
+        LondeVoiceService instance = current.get();
+        if (instance != null) instance.ui.post(instance::stopWake);
+    }
+
     static void rearmWake() {
         LondeVoiceService instance = current.get();
         if (instance != null) instance.ui.postDelayed(
