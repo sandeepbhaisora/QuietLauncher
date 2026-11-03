@@ -61,6 +61,13 @@ jobs:
             app/src/main/java/dev/quiet/launcher/LocalFirstRouter.java \
             app/src/test/java/dev/quiet/launcher/LocalFirstRouterTest.java
           java -cp /tmp/quiet-routing-tests dev.quiet.launcher.LocalFirstRouterTest
+      - name: Test Qwen-first fallback policy (JVM)
+        run: |
+          mkdir -p /tmp/quiet-qwen-tests
+          javac -encoding UTF-8 -d /tmp/quiet-qwen-tests \
+            app/src/main/java/dev/quiet/launcher/LocalReplyPolicy.java \
+            app/src/test/java/dev/quiet/launcher/LocalReplyPolicyTest.java
+          java -cp /tmp/quiet-qwen-tests dev.quiet.launcher.LocalReplyPolicyTest
       # Never expose a persistent signing key to pull requests.
       - name: Prepare permanent signing for main builds
         if: github.event_name != 'pull_request'
@@ -90,6 +97,13 @@ jobs:
         run: bash scripts/install_local_voice.sh
       - name: Install bundled offline Hey Londe keyword model
         run: bash scripts/install_londe_wake.sh
+      - name: Keep model weights out of APK (downloadable separately)
+        run: |
+          # Retain the tiny generated wake-word token phrase; omit ONNX weights.
+          find app/src/main/assets/quiet_voice -maxdepth 1 -type f -delete
+          find app/src/main/assets/londe_wake -maxdepth 1 -type f \
+            ! -name 'keywords.txt' ! -name 'ORIGIN.txt' -delete
+          echo "Only native runtime and small wake token metadata will be packaged."
       - name: Assemble installable debug APK
         run: gradle --no-daemon :app:assembleDebug
       - name: Delete temporary keystore

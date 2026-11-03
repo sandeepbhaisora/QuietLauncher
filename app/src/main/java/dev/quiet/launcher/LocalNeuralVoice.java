@@ -116,11 +116,7 @@ final class LocalNeuralVoice {
     }
 
     static boolean modelPackaged(Context context) {
-        try (InputStream in = context.getAssets().open(ASSET_DIR + "tts.json")) {
-            return in.read() >= 0;
-        } catch (Exception ex) {
-            return false;
-        }
+        return OptionalModelPacks.installed(context, OptionalModelPacks.Pack.VOICE);
     }
 
     void speak(String raw, Listener listener) {
@@ -237,26 +233,9 @@ final class LocalNeuralVoice {
 
     private void ensureReady() throws Exception {
         if (tts != null) return;
-        if (!modelPackaged(context)) {
-            throw new IllegalStateException("Offline voice assets missing from APK");
-        }
-        File model = new File(context.getFilesDir(), "quiet_supertonic_3");
-        if (!model.isDirectory() && !model.mkdirs())
-            throw new IllegalStateException("Cannot create model directory");
-        for (String name : FILES) {
-            File dest = new File(model, name);
-            if (dest.isFile() && dest.length() > 0) continue;
-            File staged = new File(model, name + ".partial");
-            try (InputStream in = context.getAssets().open(ASSET_DIR + name);
-                 FileOutputStream out = new FileOutputStream(staged)) {
-                byte[] bytes = new byte[65536];
-                int n;
-                while ((n = in.read(bytes)) != -1) out.write(bytes, 0, n);
-                out.getFD().sync();
-            }
-            if (!staged.renameTo(dest))
-                throw new IllegalStateException("Cannot install local model: " + name);
-        }
+        if (!modelPackaged(context))
+            throw new IllegalStateException("Download Supertonic in Quiet Settings first");
+        File model = OptionalModelPacks.modelDirectory(context, OptionalModelPacks.Pack.VOICE);
         // The Android AAR exposes Kotlin data classes (setters), unlike the
         // separate desktop Java example with builder() helpers.
         OfflineTtsSupertonicModelConfig supertonic = new OfflineTtsSupertonicModelConfig();

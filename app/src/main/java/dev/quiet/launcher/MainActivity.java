@@ -112,7 +112,8 @@ public final class MainActivity extends Activity {
     private boolean setupPromptScheduled;
     private long lastRefreshElapsed;
     private static final int REQ_WAKE_MIC=886;
-    private HomeWakeListener homeWake;
+    private OfflineWakePipeline homeWake;
+    private int homeWakeGeneration;
     private boolean foregroundHome;
     private TextView londeStatus, londeReply;
     private QuietFace assistantFace;
@@ -220,6 +221,7 @@ public final class MainActivity extends Activity {
             if (grants.length > 0 && grants[0] == PackageManager.PERMISSION_GRANTED) {
                 prefs.edit().putBoolean("londe_wake_enabled", true).apply();
                 LondeVoiceService.refreshWake();
+                handler.postDelayed(this::startWakeIfAllowed,650);
                 wakeStatus("HEY LONDE · OFFLINE DETECTOR ENABLED");
             } else {
                 prefs.edit().putBoolean("londe_wake_enabled", false).apply();
@@ -260,15 +262,18 @@ public final class MainActivity extends Activity {
         // Do not start Android SpeechRecognizer when the launcher becomes visible.
         if (initialResumePending) {
             initialResumePending = false;
+            handler.postDelayed(this::startWakeIfAllowed, 600);
             return;
         }
         if (SystemClock.elapsedRealtime() - lastRefreshElapsed >= 15000) refreshAsync();
         else if ("home".equals(page)) render();
+        handler.postDelayed(this::startWakeIfAllowed, 550);
     }
 
     @Override protected void onPause() {
         foregroundHome=false;
         stopWake();
+        LondeVoiceService.rearmWake();
         if(londeSpeech!=null)londeSpeech.stop();
         if(neuralVoice!=null)neuralVoice.stop();
         londeSpeaking=false;
@@ -388,7 +393,13 @@ public final class MainActivity extends Activity {
         add(view, r, 23);
     }
 
-    private void show(String next) { if (next.equals(page) && shell != null) return; if(!"home".equals(next))stopWake(); page = next; render(); }
+    private void show(String next) {
+        if (next.equals(page) && shell != null) return;
+        if (!"home".equals(next)) stopWake();
+        page = next;
+        render();
+        if("home".equals(next))handler.postDelayed(this::startWakeIfAllowed,400);
+    }
     private void render() {
         if (prefs == null) return;
         setPalette(); focusLive = null; clockLive = null;
@@ -760,12 +771,59 @@ public final class MainActivity extends Activity {
         dialog.show();
     }
 
+    private void manageOptionalPack(OptionalModelPacks.Pack pack) {
+        String status=OptionalModelPacks.status(this,pack);
+        if(OptionalModelPacks.installed(this,pack)) {
+            new AlertDialog.Builder(this).setTitle(pack.title)
+                    .setMessage("Installed and available offline. " +
+                            (pack==OptionalModelPacks.Pack.VOICE
+                                ? "The natural voice works with no internet. Choose it under Londe voice engine."
+                                : "Enable Hey Londe from this settings page. Samsung still controls background microphone access."))
+                    .setPositiveButton("OK",null).show();
+            return;
+        }
+        boolean completed=status.startsWith("Downloaded");
+        new AlertDialog.Builder(this).setTitle(pack.title)
+                .setMessage(status+"\\n\\nThe model downloads once over Wi-Fi. Quiet will install it into private storage, where it works offline. This reduces the size of the APK.")
+                .setPositiveButton(completed?"Install model":"Download model",(d,w)->{
+                    if(completed) {
+                        Toast.makeText(this,"Installing model…",Toast.LENGTH_LONG).show();
+                        background.execute(()->{
+                            try {
+                                OptionalModelPacks.install(this,pack);
+                                handler.post(()->{
+                                    if(isFinishing()||isDestroyed())return;
+                                    Toast.makeText(this,pack.title+" installed",Toast.LENGTH_LONG).show();
+                                    if(pack==OptionalModelPacks.Pack.WAKE)LondeVoiceService.refreshWake();
+                                    render();
+                                });
+                            }catch(Exception ex){
+                                android.util.Log.e("OptionalModelPacks","Pack installation failed",ex);
+                                handler.post(()->{
+                                    if(!isFinishing()&&!isDestroyed())
+                                        new AlertDialog.Builder(this).setTitle("Model installation failed")
+                                                .setMessage(ex.getMessage()).setPositiveButton("OK",null).show();
+                                });
+                            }
+                        });
+                    } else {
+                        try {
+                            OptionalModelPacks.download(this,pack);
+                            Toast.makeText(this,"Download queued. Return here to check progress and install.",Toast.LENGTH_LONG).show();
+                            render();
+                        } catch(Exception ex) {
+                            Toast.makeText(this,ex.getMessage(),Toast.LENGTH_LONG).show();
+                        }
+                    }
+                })
+                .setNeutralButton("Refresh status",(d,w)->manageOptionalPack(pack))
+                .setNegativeButton("Cancel",null).show();
+    }
+
     private void configureWake() {
         boolean enabled = prefs.getBoolean("londe_wake_enabled", false);
         if (!LondeKeywordDetector.available(this)) {
-            new AlertDialog.Builder(this).setTitle("Offline wake model missing")
-                    .setMessage("The bundled Hey Londe keyword model was not found in this APK.")
-                    .setPositiveButton("OK", null).show();
+            manageOptionalPack(OptionalModelPacks.Pack.WAKE);
             return;
         }
         if (enabled) {
@@ -775,7 +833,7 @@ public final class MainActivity extends Activity {
                         prefs.edit().putBoolean("londe_wake_enabled", false).apply();
                         LondeVoiceService.refreshWake();
                         wakeStatus("VOICE WAKE OFF");
-                        show("settings");
+                        render();
                     }).setNegativeButton("Keep enabled", null).show();
             return;
         }
@@ -788,6 +846,7 @@ public final class MainActivity extends Activity {
                     }
                     prefs.edit().putBoolean("londe_wake_enabled", true).apply();
                     LondeVoiceService.refreshWake();
+                    handler.postDelayed(this::startWakeIfAllowed,650);
                     if (android.os.Build.VERSION.SDK_INT >= 29) {
                         android.app.role.RoleManager roles = getSystemService(android.app.role.RoleManager.class);
                         if (roles != null && !roles.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)) {
@@ -795,7 +854,7 @@ public final class MainActivity extends Activity {
                         }
                     }
                     wakeStatus("HEY LONDE · DETECTOR ENABLED");
-                    show("settings");
+                    render();
                 }).setNegativeButton("Cancel", null).show();
     }
 
@@ -832,7 +891,7 @@ public final class MainActivity extends Activity {
     }
     private void speakLonde(String message, String utteranceId) {
         String text = message == null ? "" : message;
-        if (useLocalNeuralVoice()) {
+        if (useLocalNeuralVoice() && LocalNeuralVoice.modelPackaged(this)) {
             londeSpeaking = true;
             neuralVoice.speak(text, (success, error) -> {
                 if (!success) {
@@ -856,11 +915,14 @@ public final class MainActivity extends Activity {
     }
     private void configureLondeVoice(){
         new AlertDialog.Builder(this).setTitle("Londe speech output")
-            .setMessage("Offline Supertonic 3 neural voice runs inside Quiet on your phone, no API key. Android voice is an optional fallback. First synthesis loads the model.")
+            .setMessage("Supertonic 3 is a downloadable offline voice. Once installed it needs no connection; otherwise use Android voice. Status: " + OptionalModelPacks.status(this,OptionalModelPacks.Pack.VOICE))
             .setPositiveButton("Use offline neural voice", (d,w) -> {
+                if(!LocalNeuralVoice.modelPackaged(this)){
+                    manageOptionalPack(OptionalModelPacks.Pack.VOICE);
+                    return;
+                }
                 setVoiceMode(true);
-                Toast.makeText(this, LocalNeuralVoice.modelPackaged(this)
-                        ? "Offline neural voice selected" : "Neural model assets missing from APK", Toast.LENGTH_LONG).show();
+                Toast.makeText(this,"Supertonic offline voice selected",Toast.LENGTH_LONG).show();
             })
             .setNeutralButton("Use Android voice", (d,w) -> {
                 setVoiceMode(false);
@@ -918,14 +980,12 @@ public final class MainActivity extends Activity {
             }).setNegativeButton("Cancel",null).show();
     }
 
-    private void voiceCompleted(String id){
+    private void voiceCompleted(String id) {
         londeSpeaking=false;
-        if(id!=null && id.startsWith("londe-wake")){
-            if(homeWake!=null)homeWake.resumeAfterAcknowledgement();
-        } else if(id!=null && id.startsWith("londe-answer")){
-            handler.postDelayed(this::startWakeIfAllowed,450);
-        }
+        if(foregroundHome && "home".equals(page))
+            handler.postDelayed(this::startWakeIfAllowed,500);
     }
+
     private void acknowledgeWake(){
         wakeStatus("HEY LONDE DETECTED · SPEAK AFTER MY REPLY");
         recentReply="Londe: Haan, bolo! I'm listening for your question.";
@@ -944,17 +1004,78 @@ public final class MainActivity extends Activity {
         if(londeStatus!=null)londeStatus.setText(value);
         if(assistantFace!=null)assistantFace.invalidate();
     }
-    private void stopWake(){
-        if(homeWake!=null){homeWake.stop();homeWake=null;}
+    private void stopWake() {
+        homeWakeGeneration++;
+        if(homeWake!=null) {
+            homeWake.stop();
+            homeWake=null;
+        }
         wakeStatus("VOICE WAKE OFF");
     }
-    private void startWakeIfAllowed(){
-        // Android SpeechRecognizer is a transcription engine, not a hotword detector.
-        // Never launch it automatically on Home. Re-enable only after adding a
-        // dedicated local keyword engine with a verified wake callback.
-        wakeStatus(prefs.getBoolean("londe_wake_enabled", false)
-                ? "HEY LONDE · SYSTEM ASSISTANT LISTENING" : "VOICE WAKE OFF");
+
+    /** Foreground-only native hotword spotting on the launcher itself. */
+    private void startWakeIfAllowed() {
+        if(!foregroundHome || !"home".equals(page) || isFinishing() || isDestroyed()
+                || replyBusy || londeSpeaking || homeWake != null) return;
+        if(!prefs.getBoolean("londe_wake_enabled",false)) {
+            wakeStatus("VOICE WAKE OFF");
+            return;
+        }
+        if(!LondeKeywordDetector.available(this)) {
+            wakeStatus("HEY LONDE · DOWNLOAD WAKE MODEL");
+            return;
+        }
+        if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED) {
+            wakeStatus("HEY LONDE · MICROPHONE PERMISSION REQUIRED");
+            return;
+        }
+        final int generation=++homeWakeGeneration;
+        LondeVoiceService.pauseWakeForSession();
+        wakeStatus("HEY LONDE · LOADING LOCAL DETECTOR");
+        background.execute(()-> {
+            OfflineWakePipeline.Detector detector;
+            try {
+                detector=new LondeKeywordDetector(this);
+            }catch(Throwable error) {
+                android.util.Log.e("QuietWake","Home keyword model initialization failed",error);
+                handler.post(()->{
+                    if(generation==homeWakeGeneration && foregroundHome)
+                        wakeStatus("HEY LONDE · MODEL INITIALIZATION FAILED");
+                });
+                return;
+            }
+            handler.postDelayed(()->{
+                if(generation!=homeWakeGeneration || !foregroundHome ||
+                        !"home".equals(page) || isFinishing() || isDestroyed()) {
+                    detector.close();
+                    return;
+                }
+                OfflineWakePipeline pipeline=new OfflineWakePipeline(this,
+                        new OfflineWakePipeline.Events(){
+                            @Override public void onWake() {
+                                homeWake=null;
+                                ++homeWakeGeneration;
+                                wakeStatus("HEY LONDE · DETECTED");
+                                // The assistant owns transcription after keyword detection.
+                                openLonde();
+                            }
+                            @Override public void onError(String reason) {
+                                homeWake=null;
+                                android.util.Log.w("QuietWake",reason);
+                                wakeStatus("HEY LONDE · " + reason);
+                            }
+                        });
+                if(pipeline.start(detector)){
+                    homeWake=pipeline;
+                    wakeStatus("HEY LONDE · LISTENING LOCALLY");
+                }else{
+                    detector.close();
+                    wakeStatus("HEY LONDE · MICROPHONE UNAVAILABLE");
+                }
+            },350);
+        });
     }
+
     private void homeAsk(String request){
         String q=request==null?"":request.trim();
         if(q.isEmpty())return;
@@ -966,7 +1087,7 @@ public final class MainActivity extends Activity {
             String response = LocalFirstRouter.localAnswer(routing,
                     System.currentTimeMillis(),
                     prefs.getLong("focusUntil", 0L), Locale.getDefault());
-            recentReply = "You: " + q + "\\n\\nLonde: " + response;
+            recentReply = "You: " + q + "\\n\\nSOURCE: LOCAL PHONE TOOLS\\n\\nLonde: " + response;
             if (londeReply != null) londeReply.setText(recentReply);
             wakeStatus("ANSWERED OFFLINE");
             if ("response".equals(aiScene) && "home".equals(page)) render();
@@ -1000,10 +1121,10 @@ public final class MainActivity extends Activity {
                                                 boolean fallback, float speed) {
                     if (isFinishing() || isDestroyed()) return;
                     replyBusy = false;
-                    if (fallback) { homeAskOnline(q); return; }
+                    if (fallback) { homeAskFallback(q); return; }
                     if (suggestedAction != null) {
                         String allowed = LondeCommands.normalize(suggestedAction);
-                        if (allowed == null) { homeAskOnline(q); return; }
+                        if (allowed == null) { homeAskFallback(q); return; }
                         recentReply = "Local AI proposed: " + allowed + "\\nReview before running.";
                         if (londeReply != null) londeReply.setText(recentReply);
                         wakeStatus("LOCAL AI · REVIEW ACTION");
@@ -1013,7 +1134,7 @@ public final class MainActivity extends Activity {
                     homeContext.add(new LondeClient.Turn("user", q));
                     homeContext.add(new LondeClient.Turn("assistant", text));
                     while (homeContext.size() > 18) homeContext.remove(0);
-                    recentReply = "You: " + q + "\\n\\nLonde: " + text;
+                    recentReply = "You: " + q + "\\n\\nSOURCE: QWEN3 0.6B · ON-DEVICE\\n\\nLonde: " + text;
                     if (londeReply != null) londeReply.setText(recentReply);
                     wakeStatus(String.format(Locale.ROOT, "OFFLINE QWEN3 · %.1f TOK/S", speed));
                     if ("response".equals(aiScene) && "home".equals(page)) render();
@@ -1022,11 +1143,30 @@ public final class MainActivity extends Activity {
                 @Override public void onError(String reason) {
                     if (isFinishing() || isDestroyed()) return;
                     replyBusy = false;
-                    homeAskOnline(q);
+                    homeAskFallback(q);
                 }
             });
             return;
         }
+        homeAskOnline(q);
+    }
+
+    private void homeAskFallback(String q) {
+        if (!CloudAvailability.online(this)) {
+            recentReply = "You: " + q + "\\n\\nSOURCE: QWEN3 · OFFLINE FALLBACK\\n\\nLonde: " + LocalReplyPolicy.offlineMessage();
+            if (londeReply != null) londeReply.setText(recentReply);
+            wakeStatus("OFFLINE · NO CHATGPT REQUEST");
+            speakLonde(LocalReplyPolicy.offlineMessage(),
+                    "londe-no-internet-" + SystemClock.uptimeMillis());
+            return;
+        }
+        if (!ChatGptAuth.canUsePlan(this)) {
+            recentReply = "You: " + q + "\\n\\nLonde: " + LocalReplyPolicy.unauthorizedMessage();
+            if (londeReply != null) londeReply.setText(recentReply);
+            wakeStatus("CHATGPT NOT AUTHORIZED");
+            return;
+        }
+        wakeStatus("QWEN → CHATGPT FALLBACK");
         homeAskOnline(q);
     }
 
@@ -1052,7 +1192,7 @@ public final class MainActivity extends Activity {
                     if(isFinishing()||isDestroyed())return;
                     assistantModel=result.model;replyBusy=false;
                     homeContext.add(new LondeClient.Turn("assistant",result.text));
-                    recentReply="You: "+q+"\\n\\nLonde: "+result.text;
+                    recentReply="You: "+q+"\\n\\nSOURCE: CHATGPT · "+result.model+" · ONLINE\\n\\nLonde: "+result.text;
                     if(londeReply!=null)londeReply.setText(recentReply);
                     wakeStatus("LONDE REPLIED");
                     if ("response".equals(aiScene) && "home".equals(page)) render();
@@ -1062,7 +1202,8 @@ public final class MainActivity extends Activity {
             }catch(Exception e){
                 handler.post(()->{
                     replyBusy=false;
-                    recentReply="Londe couldn't answer. "+(e.getMessage()==null?"Try again.":e.getMessage());
+                    android.util.Log.w("QuietChatFallback", "Cloud request failed", e);
+                    recentReply = LocalReplyPolicy.cloudFailedMessage();
                     if(londeReply!=null)londeReply.setText(recentReply);
                     wakeStatus("REQUEST FAILED");
                     handler.postDelayed(this::startWakeIfAllowed,1800);
@@ -1957,9 +2098,17 @@ public final class MainActivity extends Activity {
         setting("Classic home", "Original dashboard and essential app tiles", () -> show("classic"));
         setting("Intent-first home", "Default home · local commands and recommendations", () -> show("home"));
         section(main, "LONDE ASSISTANT", null, null);
-        setting("Voice wake: Hey Londe", prefs.getBoolean("londe_wake_enabled",false)
-            ? "On · offline keyword spotter" : "Off · enable local Hey Londe detector",
-            () -> configureWake());
+        setting("Download natural voice · Supertonic",
+                OptionalModelPacks.status(this,OptionalModelPacks.Pack.VOICE),
+                () -> manageOptionalPack(OptionalModelPacks.Pack.VOICE));
+        setting("Download Hey Londe detector",
+                OptionalModelPacks.status(this,OptionalModelPacks.Pack.WAKE),
+                () -> manageOptionalPack(OptionalModelPacks.Pack.WAKE));
+        setting("Voice wake: Hey Londe",
+                !LondeKeywordDetector.available(this) ? "Install wake model first"
+                : prefs.getBoolean("londe_wake_enabled",false)
+                    ? "On · offline keyword spotter" : "Off · tap to enable Hey Londe",
+                () -> configureWake());
         setting("Test Hey Londe detector", "Foreground test · shows model and mic errors",
             () -> {
                 Intent diagnostic = new Intent(this, LondeActivity.class);

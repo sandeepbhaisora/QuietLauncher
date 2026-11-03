@@ -29,29 +29,13 @@ final class LondeKeywordDetector implements OfflineWakePipeline.Detector {
     private final OnlineStream stream;
 
     static boolean available(Context context) {
-        try (InputStream in = context.getAssets().open(ASSET_DIR + "keywords.txt")) {
-            return in.read() != -1;
-        } catch (Exception ex) {
-            return false;
-        }
+        return OptionalModelPacks.installed(context, OptionalModelPacks.Pack.WAKE);
     }
 
     LondeKeywordDetector(Context context) throws Exception {
-        File folder = new File(context.getFilesDir(), "londe_kws_v1");
-        if (!folder.exists() && !folder.mkdirs())
-            throw new IllegalStateException("Cannot store wake model");
-        for (String name : FILES) {
-            File target = new File(folder, name);
-            if (target.isFile() && target.length() > 0) continue;
-            File temp = new File(folder, name + ".download");
-            try (InputStream input = context.getAssets().open(ASSET_DIR + name);
-                 FileOutputStream out = new FileOutputStream(temp)) {
-                byte[] data = new byte[32 * 1024];
-                int read;
-                while ((read = input.read(data)) > 0) out.write(data, 0, read);
-            }
-            if (!temp.renameTo(target)) throw new IllegalStateException("Wake model install failed");
-        }
+        if (!available(context))
+            throw new IllegalStateException("Install Hey Londe detector in Quiet Settings first");
+        File folder=OptionalModelPacks.modelDirectory(context,OptionalModelPacks.Pack.WAKE);
         OnlineTransducerModelConfig transducer = new OnlineTransducerModelConfig();
         transducer.setEncoder(new File(folder, FILES[0]).getAbsolutePath());
         transducer.setDecoder(new File(folder, FILES[1]).getAbsolutePath());
