@@ -49,4 +49,5 @@ android {
 // scripts/install_local_voice.sh downloads this verified native AAR before Gradle runs.
 dependencies {
     implementation(files("libs/sherpa-onnx-2.0.1.aar"))
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:2.0.21")
 }
