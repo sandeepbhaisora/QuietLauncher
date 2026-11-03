@@ -8,8 +8,9 @@ On a first installation:
 2. Wait for DownloadManager notification on Wi-Fi; reopen row → **Install model**. Voice now works offline.
 3. Quiet Settings → **Download Hey Londe detector** → Download model → **Install model**.
 4. Quiet Settings → **Voice wake: Hey Londe** → Enable (requests microphone permission). To make wake work with the app in the background, select Quiet as Android digital assistant. Screen-off hotword detection is not guaranteed on Samsung.
-5. Optional model installation decompresses the upstream tar.bz2 into private app storage, limits entry names and sizes and activates only complete recognized sets of weights. The tiny Hey Londe keyword vocabulary is included in the APK.
-6. Android TTS remains the fallback before Supertonic is installed. Qwen remains separately downloadable as before.
+5. When Quiet Home is visible, **Hey Londe** now runs the real downloaded keyword spotter directly in the foreground; it launches Londe's speech session when detected. This does **not** require the Android default-assistant role for screen-on/foreground testing. Outside Quiet Home, Samsung controls whether an opted-in default-assistant service can keep its microphone active.
+6. Optional model installation decompresses the upstream tar.bz2 into private app storage, limits entry names and sizes and activates only complete recognized sets of weights. The tiny Hey Londe keyword vocabulary is included in the APK.
+7. Android TTS remains the fallback before Supertonic is installed. Qwen remains separately downloadable as before.
 
 For upgrades from older APKs, previously extracted and valid model files remain in private storage. **Do not uninstall or clear app data when upgrading.**
 
