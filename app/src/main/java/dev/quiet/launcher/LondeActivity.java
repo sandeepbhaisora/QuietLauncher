@@ -153,7 +153,7 @@ public final class LondeActivity extends Activity {
                 getSharedPreferences("londe_voice_v1", MODE_PRIVATE).edit()
                         .putString("voice_mode","neural").apply();
                 toast(LocalNeuralVoice.modelPackaged(this)
-                        ? "Offline voice active. Testing Hindi..." : "Voice model missing from this APK.");
+                        ? "Offline neural voice active" : "Install Supertonic voice pack in Quiet Settings first");
                 say("नमस्ते भाई, मैं लोंडे हूँ। बताओ क्या करना है?");
             })
             .setNeutralButton("Android fallback", (d,w) -> {
@@ -351,7 +351,7 @@ public final class LondeActivity extends Activity {
     private void say(String value) {
         if (!readAloud) return;
         String shortened = value.length()>750 ? value.substring(0,750)+"…" : value;
-        if (useLocalVoice()) {
+        if (useLocalVoice() && LocalNeuralVoice.modelPackaged(this)) {
             neuralVoice.speak(shortened, (success,error) -> {
                 if (!success) {
                     status.setText("LOCAL VOICE ERROR");
@@ -372,11 +372,12 @@ public final class LondeActivity extends Activity {
         if(result==TextToSpeech.ERROR)voiceFinished();
     }
     private boolean canSpeak() {
-        return readAloud && (useLocalVoice() || speechReady);
+        return readAloud && ((useLocalVoice() && LocalNeuralVoice.modelPackaged(this)) || speechReady);
     }
+    private String answerSource = "LONDE · LOCAL TOOLS";
     private void showAnswer(String result) {
         currentAnswer=result;
-        answer.setText(result);
+        answer.setText("SOURCE  /  " + answerSource + "\\n\\n" + result);
         answerScroll.post(()->answerScroll.scrollTo(0,0));
     }
     private void localAnswer(String request,String response) {
@@ -429,8 +430,8 @@ public final class LondeActivity extends Activity {
             return;
         }
         if (!LondeKeywordDetector.available(this)) {
-            setPhase(Phase.READY, "WAKE MODEL NOT BUNDLED");
-            showAnswer("This APK does not include the offline HEY LONDE keyword model.");
+            setPhase(Phase.READY, "HEY LONDE MODEL NOT INSTALLED");
+            showAnswer("Open Quiet Settings → LONDE ASSISTANT → Download Hey Londe detector. Install it, then reopen this test.");
             return;
         }
         LondeVoiceService.pauseWakeForSession();
@@ -687,6 +688,7 @@ public final class LondeActivity extends Activity {
         if(q.isEmpty())return;
         if(q.length()>1500){localAnswer("Input","Please keep requests under 1500 characters.");return;}
         lastRequest.setText("YOU  /  "+q);
+        answerSource = "LONDE · LOCAL TOOLS";
         String simple = q.toLowerCase(Locale.ROOT).trim().replaceAll("[.!?।]+$", "");
         if (simple.matches("(?:hey londe[, ]+)?(?:stop londe|stop listening|go to sleep|बस कर|बंद हो जा|सो जा|chup ho ja|londe bas|londe stop)")) {
             activeSession = false;
@@ -731,6 +733,7 @@ public final class LondeActivity extends Activity {
                 getSharedPreferences("quiet_local_v1", MODE_PRIVATE)
                     .getBoolean("londe_local_brain_enabled", true)) {
             busy = true;
+            answerSource = "QWEN3 0.6B · ON-DEVICE";
             setPhase(Phase.THINKING, "LOCAL AI · QWEN3");
             showAnswer("Thinking on your phone · no internet needed…");
             StringBuilder context = new StringBuilder();
@@ -798,6 +801,7 @@ public final class LondeActivity extends Activity {
             setPhase(Phase.READY, "CHATGPT NOT AUTHORIZED");
             return;
         }
+        answerSource = "CHATGPT · ONLINE FALLBACK";
         setPhase(Phase.THINKING, "QWEN → CHATGPT FALLBACK");
         askChatGpt(q);
     }
@@ -808,6 +812,7 @@ public final class LondeActivity extends Activity {
             setPhase(Phase.READY,"NOT CONNECTED");
             return;
         }
+        answerSource = "CHATGPT · ONLINE";
         busy=true;
         setPhase(Phase.THINKING,"THINKING…");
         showAnswer("Working on it…");
@@ -845,7 +850,7 @@ public final class LondeActivity extends Activity {
     private void showStreaming(String partial) {
         if(phase!=Phase.THINKING)return;
         currentAnswer=partial;
-        answer.setText(partial);
+        answer.setText("SOURCE  /  " + answerSource + "\\n\\n" + partial);
     }
     private boolean looksLikeAction(String q) {
         // Explicit imperative commands only. Questions go to the assistant model.
