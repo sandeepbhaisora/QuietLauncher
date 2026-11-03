@@ -1,7 +1,7 @@
 package dev.quiet.launcher;
 
 import android.Manifest;
-import android.app.Activity;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
@@ -26,7 +26,7 @@ final class OfflineWakePipeline {
         void onWake();
         void onError(String reason);
     }
-    private final Activity activity;
+    private final Context context;
     private final Events events;
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile boolean running;
@@ -34,14 +34,14 @@ final class OfflineWakePipeline {
     private AudioRecord microphone;
     private Detector detector;
 
-    OfflineWakePipeline(Activity activity, Events events) {
-        this.activity = activity;
+    OfflineWakePipeline(Context context, Events events) {
+        this.context = context;
         this.events = events;
     }
 
     synchronized boolean start(Detector provided) {
         if (provided == null) return false;
-        if (running || activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+        if (running || context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) return false;
         detector = provided;
         running = true;
