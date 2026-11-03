@@ -2366,7 +2366,207 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void v2SettingRow(LinearLayout parent,String symbol,String title,
+                              String subtitle,String status,Runnable action) {
+        LinearLayout item=row();
+        item.setPadding(dp(5),dp(14),dp(5),dp(14));
+        TextView glyph=text(symbol,21,V2_MINT,true);
+        glyph.setGravity(Gravity.CENTER);
+        item.addView(glyph,new LinearLayout.LayoutParams(dp(36),dp(38)));
+        LinearLayout labels=column();
+        add(labels,text(title,15,V2_TEXT,true),0);
+        if(subtitle!=null&&!subtitle.isEmpty())add(labels,text(subtitle,12,V2_DIM,false),3);
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);lp.leftMargin=dp(8);
+        item.addView(labels,lp);
+        if(status!=null&&!status.isEmpty()) {
+            TextView state=text(status,11,V2_MINT,true);
+            state.setMaxLines(2);
+            state.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);
+            item.addView(state,new LinearLayout.LayoutParams(dp(90),-2));
+        }
+        item.addView(text("  ›",22,V2_DIM,false));
+        parent.addView(item);
+        item.setOnClickListener(v->action.run());
+        View lineView=new View(this);lineView.setBackgroundColor(V2_LINE);
+        parent.addView(lineView,new LinearLayout.LayoutParams(-1,dp(1)));
+    }
+    private void v2SettingsGroup(String symbol,String title,String subtitle,
+                                 String status,String target){
+        LinearLayout group=v2Panel();
+        LinearLayout header=row();
+        TextView emblem=text(symbol,27,V2_MINT,true);
+        header.addView(emblem,new LinearLayout.LayoutParams(dp(48),-2));
+        LinearLayout labels=column();
+        add(labels,text(title,20,V2_TEXT,true),0);
+        add(labels,text(subtitle,12,V2_DIM,false),5);
+        header.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+        header.addView(text("›",26,V2_MINT,false));
+        group.addView(header);
+        if(status!=null){
+            TextView line=text(status,12,V2_MINT,true);
+            add(group,line,12);
+        }
+        group.setOnClickListener(v->show(target));
+        add(main,group,13);
+    }
+    private void v2SettingsHeader(String title,String subtitle){
+        main.setBackgroundColor(V2_BG);
+        main.setPadding(dp(4),dp(8),dp(4),dp(28));
+        add(main,text(title,29,V2_TEXT,true),12);
+        add(main,text(subtitle,13,V2_DIM,false),5);
+    }
     private void renderSettings() {
+        v2SettingsHeader("Settings & Tools","Your assistant, your data, your rules.");
+        v2SettingsGroup("◈","On-device brain","Manage your local AI model",
+                LocalBrainModels.status(this),"settings_ai");
+        v2SettingsGroup("◎","Memory","What Londe remembers and learns",
+                LocalMemoryStore.status(this),"settings_memory");
+        v2SettingsGroup("▦","Tools & permissions","Control access to phone capabilities",
+                null,"settings_tools");
+        v2SettingsGroup("🎙","Voice & online fallback","Wake, speech and GPT permissions",
+                prefs.getBoolean("londe_wake_enabled",false)
+                    ? "Hey Londe enabled":"Wake phrase off","settings_voice");
+        v2SettingsGroup("⌂","Phone & appearance","Launcher, privacy and essential apps",
+                null,"settings_phone");
+
+        LinearLayout privacy=v2Panel();
+        add(privacy,text("♧  Designed for private use",15,V2_TEXT,true),0);
+        add(privacy,v2Caption("Local memory stays on your phone. GPT online is used only after spoken permission."),9);
+        add(main,privacy,20);
+        add(main,v2Pill("See every setting  →",()->show("settings_advanced")),13);
+    }
+    private void renderSettingsDetails(){
+        switch(page){
+            case "settings_ai": {
+                v2SettingsHeader("On-device brain","Manage your local AI without changing phone tools.");
+                LinearLayout p=v2Panel();
+                v2SettingRow(p,"◈","Qwen3 0.6B",LocalBrainModels.status(this),
+                        LocalBrainModels.installed(this)?"Installed":"Optional",this::configureLocalBrain);
+                v2SettingRow(p,"✦","Test offline AI","Ask Londe without online inference",
+                        "",()->{
+                            if(!LocalBrainModels.installed(this)){configureLocalBrain();return;}
+                            openLonde();
+                        });
+                add(main,p,17);
+                add(main,v2Caption("Additional models for Londe 2.0 are a future milestone; none are shown as installed."),15);
+                break;
+            }
+            case "settings_memory": {
+                v2SettingsHeader("Memory","Review and control what Londe remembers.");
+                LinearLayout p=v2Panel();
+                v2SettingRow(p,"◎","On-device memory",
+                        LocalMemoryStore.status(this),"",
+                        this::configureLocalMemory);
+                v2SettingRow(p,"▤","Review saved memories","Inspect notes and question categories",
+                        "",()->new AlertDialog.Builder(this)
+                                .setTitle("Saved on this device")
+                                .setMessage(LocalMemoryStore.describe(this))
+                                .setPositiveButton("Done",null).show());
+                v2SettingRow(p,"⌫","Clear memory","Erase saved notes and recent context",
+                        "",()->new AlertDialog.Builder(this)
+                                .setTitle("Clear Londe memory?")
+                                .setMessage("Delete all saved notes and question interests? This cannot be undone.")
+                                .setPositiveButton("Clear",(d,w)->{
+                                    LocalMemoryStore.clear(this);
+                                    LocalSessionContext.clear();
+                                    homeContext.clear();
+                                    homeOnlineContext.clear();
+                                    render();
+                                }).setNegativeButton("Cancel",null).show());
+                add(main,p,17);
+                break;
+            }
+            case "settings_tools": {
+                v2SettingsHeader("Tools & permissions","Use Android capabilities with permission.");
+                LinearLayout p=v2Panel();
+                v2SettingRow(p,"▦","Apps","Open installed applications",
+                        "Local",()->show("apps"));
+                v2SettingRow(p,"◷","Calendar","Read events when Android allows",
+                        checkSelfPermission(Manifest.permission.READ_CALENDAR)
+                                ==PackageManager.PERMISSION_GRANTED?"Allowed":"Permission",
+                        ()->openLonde());
+                v2SettingRow(p,"▤","Messages","Open SMS and WhatsApp drafts",
+                        "Review",this::openLonde);
+                v2SettingRow(p,"♧","Notifications",
+                        LondeNotificationListener.includedInBuild(this)
+                                ? "Optional Android notification permission"
+                                : "Unavailable in standard APK",
+                        LondeNotificationListener.includedInBuild(this)?"Optional":"Limited",
+                        ()->PhoneAssistantActions.requestNotificationAccess(this));
+                v2SettingRow(p,"◎","Focus sessions","Start a distraction-free timer",
+                        "",this::focusDialog);
+                add(main,p,17);
+                break;
+            }
+            case "settings_voice": {
+                v2SettingsHeader("Voice & online fallback","Choose how Londe listens and replies.");
+                LinearLayout p=v2Panel();
+                v2SettingRow(p,"🎙","Wake word",
+                        prefs.getBoolean("londe_wake_enabled",false)?"Hey Londe enabled":"Enable microphone wake",
+                        "",this::configureWake);
+                v2SettingRow(p,"✦","Wake phrase",
+                        prefs.getBoolean("londe_wake_short_enabled",false)
+                            ? "Hey Londe or Londe (experimental)":"Hey Londe only",
+                        "",this::configureWakeKeyword);
+                v2SettingRow(p,"◉","Wake sensitivity","Adjust how often Londe hears you",
+                        "",()->new AlertDialog.Builder(this)
+                                .setTitle("Wake sensitivity")
+                                .setItems(new String[]{"Standard","High"},
+                                        (d,i)->changeWakeSensitivity(i==1))
+                                .setNegativeButton("Cancel",null).show());
+                v2SettingRow(p,"◖","Offline speech","Supertonic or Android voice",
+                        "",this::configureLondeVoice);
+                v2SettingRow(p,"♫","Voice quality","Speech speaker and speed",
+                        "",this::configureOfflineVoiceQuality);
+                v2SettingRow(p,"···","Thinking hum","One quiet offline acknowledgement",
+                        prefs.getBoolean("londe_thinking_hum",true)?"On":"Off",
+                        ()->{
+                            prefs.edit().putBoolean("londe_thinking_hum",
+                                    !prefs.getBoolean("londe_thinking_hum",true)).apply();
+                            render();
+                        });
+                v2SettingRow(p,"☁","ChatGPT account",
+                        ChatGptAuth.isConnected(this)?"Connected":"Optional sign-in",
+                        "",this::chatGptAccountDialog);
+                add(main,p,17);
+                LinearLayout note=v2Panel();
+                add(note,text("Online GPT only after your spoken permission",14,V2_MINT,true),0);
+                add(note,v2Caption("Londe asks aloud before sending an unanswered offline request."),7);
+                add(main,note,13);
+                break;
+            }
+            case "settings_phone": {
+                v2SettingsHeader("Phone & appearance","Make the launcher your own.");
+                LinearLayout p=v2Panel();
+                v2SettingRow(p,"⌂","Default launcher","Use Quiet as your Android home",
+                        "",()->startSafe(new Intent(Settings.ACTION_HOME_SETTINGS)));
+                v2SettingRow(p,"✦","Default voice assistant","Assign Londe as the phone assistant",
+                        "",this::requestAssistantRole);
+                v2SettingRow(p,"◒","Appearance","Ink, Paper or True Black",
+                        "",this::chooseTheme);
+                v2SettingRow(p,"☆","Favourite apps","Choose your essential apps",
+                        "",this::editFavorites);
+                v2SettingRow(p,"⊘","Hidden apps","Manage your app drawer",
+                        "",()->selectApps("hidden","Hide apps"));
+                v2SettingRow(p,"♙","Protected apps","Require device authentication",
+                        "",()->selectApps("protected","Protect apps"));
+                v2SettingRow(p,"◷","Screen time","Review Android usage permission",
+                        hasUsage?"Allowed":"Off",
+                        ()->startSafe(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)));
+                add(main,p,17);
+                break;
+            }
+            default: {
+                v2SettingsHeader("All settings","Advanced controls, diagnostics and legacy options.");
+                add(main,v2Pill("←  Return to overview",()->show("settings")),12);
+                renderSettingsLegacy();
+                return;
+            }
+        }
+        add(main,v2Pill("←  Settings overview",()->show("settings")),24);
+    }
+
+    private void renderSettingsLegacy() {
         add(main, text("Make it yours.", 34, ink, true), 17);
         add(main, text("No account. No ads. Your phone, your rules.", 14, muted, false), 5);
         section(main, "HOME", null, null);
