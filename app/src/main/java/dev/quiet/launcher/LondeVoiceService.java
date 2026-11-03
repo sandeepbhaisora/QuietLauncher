@@ -26,6 +26,7 @@ public final class LondeVoiceService extends VoiceInteractionService {
     private OfflineWakePipeline pipeline;
     private int generation;
     private boolean destroyed;
+    private volatile boolean conversationOwnsMic;
 
     @Override public void onReady() {
         super.onReady();
@@ -36,6 +37,7 @@ public final class LondeVoiceService extends VoiceInteractionService {
     /** Only a live, user-selected system assistant may listen persistently. */
     private boolean permitted() {
         return !destroyed
+                && !conversationOwnsMic
                 && isActiveService(this, new ComponentName(this, LondeVoiceService.class))
                 && getSharedPreferences("quiet_local_v1", MODE_PRIVATE)
                        .getBoolean("londe_wake_enabled", false)
@@ -106,13 +108,18 @@ public final class LondeVoiceService extends VoiceInteractionService {
 
     static void pauseWakeForSession() {
         LondeVoiceService instance = current.get();
-        if (instance != null) instance.ui.post(instance::stopWake);
+        if (instance != null) instance.ui.post(() -> {
+            instance.conversationOwnsMic = true;
+            instance.stopWake();
+        });
     }
 
     static void rearmWake() {
         LondeVoiceService instance = current.get();
-        if (instance != null) instance.ui.postDelayed(
-                instance::startWakeIfAllowed, 900);
+        if (instance != null) instance.ui.postDelayed(() -> {
+            instance.conversationOwnsMic = false;
+            instance.startWakeIfAllowed();
+        }, 900);
     }
 
     @Override public void onShutdown() {
