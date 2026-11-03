@@ -982,6 +982,55 @@ public final class MainActivity extends Activity {
             handleLondeAction(action);
             return;
         }
+        if (LocalBrainModels.installed(this) &&
+                prefs.getBoolean("londe_local_brain_enabled", true)) {
+            replyBusy = true;
+            wakeStatus("LOCAL QWEN3 THINKING");
+            if (londeReply != null) londeReply.setText("You: " + q + "\\n\\nThinking on this phone…");
+            StringBuilder history = new StringBuilder();
+            int start = Math.max(0, homeContext.size() - 6);
+            for (int i = start; i < homeContext.size(); i++) {
+                LondeClient.Turn turn = homeContext.get(i);
+                history.append(turn.role).append(": ")
+                        .append(turn.text.length() > 180 ?
+                                turn.text.substring(0, 180) : turn.text).append("\\n");
+            }
+            LocalBrain.ask(this, q, history.toString(), new LocalBrain.Callback() {
+                @Override public void onResult(String text, String suggestedAction,
+                                                boolean fallback, float speed) {
+                    if (isFinishing() || isDestroyed()) return;
+                    replyBusy = false;
+                    if (fallback) { homeAskOnline(q); return; }
+                    if (suggestedAction != null) {
+                        String allowed = LondeCommands.normalize(suggestedAction);
+                        if (allowed == null) { homeAskOnline(q); return; }
+                        recentReply = "Local AI proposed: " + allowed + "\\nReview before running.";
+                        if (londeReply != null) londeReply.setText(recentReply);
+                        wakeStatus("LOCAL AI · REVIEW ACTION");
+                        handleLondeAction(allowed);
+                        return;
+                    }
+                    homeContext.add(new LondeClient.Turn("user", q));
+                    homeContext.add(new LondeClient.Turn("assistant", text));
+                    while (homeContext.size() > 18) homeContext.remove(0);
+                    recentReply = "You: " + q + "\\n\\nLonde: " + text;
+                    if (londeReply != null) londeReply.setText(recentReply);
+                    wakeStatus(String.format(Locale.ROOT, "OFFLINE QWEN3 · %.1f TOK/S", speed));
+                    if ("response".equals(aiScene) && "home".equals(page)) render();
+                    speakLonde(text, "londe-local-ai-" + SystemClock.uptimeMillis());
+                }
+                @Override public void onError(String reason) {
+                    if (isFinishing() || isDestroyed()) return;
+                    replyBusy = false;
+                    homeAskOnline(q);
+                }
+            });
+            return;
+        }
+        homeAskOnline(q);
+    }
+
+    private void homeAskOnline(String q) {
         if(!ChatGptAuth.canUsePlan(this)){
             recentReply="Connect ChatGPT in Settings for Londe's general answers.";
             if(londeReply!=null)londeReply.setText(recentReply);
