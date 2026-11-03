@@ -96,7 +96,7 @@ object LocalBrain {
                     """.trimIndent()
                     val fullQuestion = (if (recentContext.isBlank()) "" else
                             "Earlier turns for context:\n" + recentContext.takeLast(600) + "\n") +
-                            "Current user request: " + question.take(750)
+                            "Current user request: /no_think " + question.take(750)
                     Llama.complete(model!!, fullQuestion, instructions, 180)
                     } finally {
                         safety.edit().remove("inference_in_progress").commit()
@@ -106,7 +106,17 @@ object LocalBrain {
                 val start = body.indexOf('{')
                 val end = body.lastIndexOf('}')
                 if (start < 0 || end <= start) {
-                    main.post { callback.onResult("", null, true, result.tokensPerSecond) }
+                    // Small models occasionally ignore JSON instructions. A plain
+                    // conversational answer is safe to *display* (never execute)
+                    // when it is not an unfinished thinking trace. This makes the
+                    // first offline inference test useful despite model variance.
+                    val plain = body.removePrefix("```").removePrefix("json").trim()
+                    if (plain.length in 6..650 && !plain.contains("<think")
+                        && !plain.contains("assistant:") && !plain.startsWith("{")) {
+                        main.post { callback.onResult(plain, null, false, result.tokensPerSecond) }
+                    } else {
+                        main.post { callback.onResult("", null, true, result.tokensPerSecond) }
+                    }
                     return@launch
                 }
                 val json = JSONObject(body.substring(start, end + 1))
