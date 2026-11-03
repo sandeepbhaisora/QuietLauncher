@@ -1,7 +1,8 @@
 package dev.quiet.launcher;
 
 import android.app.Notification;
-import android.app.NotificationManager;
+import android.content.ComponentName;
+import android.provider.Settings;
 import android.content.Context;
 import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
@@ -30,8 +31,16 @@ public final class LondeNotificationListener extends NotificationListenerService
         super.onDestroy();
     }
     static boolean authorized(Context context) {
-        return NotificationManager.getEnabledNotificationListenerPackages(context)
-                .contains(context.getPackageName());
+        String enabled = Settings.Secure.getString(context.getContentResolver(),
+                "enabled_notification_listeners");
+        if (enabled == null || enabled.isEmpty()) return false;
+        for (String component : enabled.split(":")) {
+            ComponentName name = ComponentName.unflattenFromString(component);
+            if (name != null && name.getPackageName().equals(context.getPackageName())
+                    && name.getClassName().equals(LondeNotificationListener.class.getName()))
+                return true;
+        }
+        return false;
     }
     static boolean connected() { return current.get() != null; }
 
