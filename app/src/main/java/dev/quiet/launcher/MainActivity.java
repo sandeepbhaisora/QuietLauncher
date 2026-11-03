@@ -121,6 +121,7 @@ public final class MainActivity extends Activity {
     private QuietFace assistantFace;
     private TextToSpeech londeSpeech;
     private LocalNeuralVoice neuralVoice;
+    private ThinkingHum thinkingHum;
     private boolean voiceReady, replyBusy;
     private String recentReply="Say Hey Londe to ask or command.";
     private String wakeState="VOICE WAKE OFF";
@@ -155,6 +156,7 @@ public final class MainActivity extends Activity {
         widgetHost = new AppWidgetHost(this, WIDGET_HOST_ID);
         setPalette();
         neuralVoice = new LocalNeuralVoice(this);
+        thinkingHum = new ThinkingHum(this);
         if (getSharedPreferences("londe_voice_v1", MODE_PRIVATE)
                 .getBoolean("neural_crash_warning_pending", false)) {
             getSharedPreferences("londe_voice_v1", MODE_PRIVATE).edit()
@@ -254,6 +256,7 @@ public final class MainActivity extends Activity {
     @Override protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
         stopWake();
+        if(thinkingHum!=null)thinkingHum.close();
         if(neuralVoice!=null)neuralVoice.close();
         if(londeSpeech!=null){londeSpeech.stop();londeSpeech.shutdown();}
         background.shutdownNow();
@@ -292,6 +295,7 @@ public final class MainActivity extends Activity {
         LondeVoiceService.rearmWake();
         if(londeSpeech!=null)londeSpeech.stop();
         if(neuralVoice!=null)neuralVoice.stop();
+        if(thinkingHum!=null)thinkingHum.stop();
         londeSpeaking=false;
         ChatGptAuth.onLauncherPaused();
         super.onPause();
@@ -914,6 +918,7 @@ public final class MainActivity extends Activity {
                 .putString("voice_mode", neural ? "neural" : "android").apply();
     }
     private void speakLonde(String message, String utteranceId) {
+        if(thinkingHum!=null)thinkingHum.stop();
         String text = message == null ? "" : message;
         if (useLocalNeuralVoice() && LocalNeuralVoice.modelPackaged(this)) {
             londeSpeaking = true;
@@ -1176,6 +1181,14 @@ public final class MainActivity extends Activity {
         if(replyBusy){wakeStatus("BUSY · TRY AGAIN");return;}
         stopWake();
         if(q.length()>700){wakeStatus("REQUEST TOO LONG");return;}
+        String remembered = LocalMemoryStore.command(this,q);
+        if(remembered != null) {
+            recentReply = "You: " + q + "\n\nSOURCE: PRIVATE ON-DEVICE MEMORY\n\nLonde: " + remembered;
+            if(londeReply!=null)londeReply.setText(recentReply);
+            wakeStatus("LOCAL MEMORY");
+            speakLonde(remembered, "londe-memory-" + SystemClock.uptimeMillis());
+            return;
+        }
         if(PhoneAssistantActions.tryHandle(this,q,response -> {
             recentReply="You: "+q+"\n\nSOURCE: ANDROID PHONE SKILLS · ON DEVICE\n\nLonde: "+response;
             if(londeReply!=null)londeReply.setText(recentReply);
@@ -1208,9 +1221,11 @@ public final class MainActivity extends Activity {
             handleLondeAction(action);
             return;
         }
+        LocalMemoryStore.countQuestion(this, q);
         if (LocalBrainModels.installed(this) &&
                 prefs.getBoolean("londe_local_brain_enabled", true)) {
             replyBusy = true;
+            thinkingHum.begin();
             wakeStatus("LOCAL QWEN3 THINKING");
             if (londeReply != null) londeReply.setText("You: " + q + "\n\nThinking on this phone…");
             StringBuilder history = new StringBuilder();
@@ -1226,6 +1241,7 @@ public final class MainActivity extends Activity {
                                                 boolean fallback, float speed) {
                     if (isFinishing() || isDestroyed()) return;
                     replyBusy = false;
+                    thinkingHum.stop();
                     if (fallback) { homeAskFallback(q); return; }
                     if (suggestedAction != null) {
                         String allowed = LondeCommands.normalize(suggestedAction);
@@ -1236,6 +1252,7 @@ public final class MainActivity extends Activity {
                         handleLondeAction(allowed);
                         return;
                     }
+                    LocalSessionContext.record(q, text);
                     homeContext.add(new LondeClient.Turn("user", q));
                     homeContext.add(new LondeClient.Turn("assistant", text));
                     while (homeContext.size() > 18) homeContext.remove(0);
@@ -1248,6 +1265,7 @@ public final class MainActivity extends Activity {
                 @Override public void onError(String reason) {
                     if (isFinishing() || isDestroyed()) return;
                     replyBusy = false;
+                    thinkingHum.stop();
                     homeAskFallback(q);
                 }
             });
@@ -1281,7 +1299,7 @@ public final class MainActivity extends Activity {
             if(londeReply!=null)londeReply.setText(recentReply);
             wakeStatus("CHATGPT NOT CONNECTED");return;
         }
-        replyBusy=true;wakeStatus("LONDE THINKING…");
+        replyBusy=true;thinkingHum.begin();wakeStatus("LONDE THINKING…");
         if(londeReply!=null)londeReply.setText("You: "+q+"\n\nThinking…");
         homeContext.add(new LondeClient.Turn("user",q));
         if(homeContext.size()>18)homeContext.remove(0);
@@ -1295,7 +1313,7 @@ public final class MainActivity extends Activity {
                     }));
                 handler.post(()->{
                     if(isFinishing()||isDestroyed())return;
-                    assistantModel=result.model;replyBusy=false;
+                    assistantModel=result.model;replyBusy=false;thinkingHum.stop();
                     homeContext.add(new LondeClient.Turn("assistant",result.text));
                     recentReply="You: "+q+"\n\nSOURCE: CHATGPT · "+result.model+" · ONLINE\n\nLonde: "+result.text;
                     if(londeReply!=null)londeReply.setText(recentReply);
@@ -1307,6 +1325,7 @@ public final class MainActivity extends Activity {
             }catch(Exception e){
                 handler.post(()->{
                     replyBusy=false;
+                    thinkingHum.stop();
                     android.util.Log.w("QuietChatFallback", "Cloud request failed", e);
                     recentReply = LocalReplyPolicy.cloudFailedMessage();
                     if(londeReply!=null)londeReply.setText(recentReply);
