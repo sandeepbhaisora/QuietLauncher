@@ -645,7 +645,7 @@ public final class MainActivity extends Activity {
         String greeting=hour<12?"Good morning":hour<17?"Good afternoon":"Good evening";
         add(main,v2Text(greeting+",",29,true),32);
         add(main,text("Londe is ready.",15,V2_DIM,false),4);
-        String modelState=LocalBrainModels.installed(this)
+        String modelState=LocalBrainModelCatalog.installed(this)
                 ? "●  Offline brain ready":"○  Download local brain";
         TextView model=v2Pill(modelState,()->show("settings_ai"));
         model.setTextColor(V2_MINT);
@@ -677,7 +677,7 @@ public final class MainActivity extends Activity {
         add(main,commands,22);
 
         LinearLayout chips=row();
-        v2QuickTile(chips,"◈","On-device",LocalBrainModels.installed(this)
+        v2QuickTile(chips,"◈","On-device",LocalBrainModelCatalog.installed(this)
                 ? "Qwen3 local AI":"Model not installed",()->show("settings_ai"));
         v2QuickTile(chips,"▤","Memory",LocalMemoryStore.enabled(this)
                 ? "Saved locally":"Off by default",()->show("settings_memory"));
@@ -1332,6 +1332,15 @@ public final class MainActivity extends Activity {
             speakLonde(remembered, "londe-memory-" + SystemClock.uptimeMillis());
             return;
         }
+        LocalToolPolicy.Call directTool=LocalToolPolicy.direct(q);
+        if(LocalToolExecutor.readOnly(directTool)) {
+            String result=LocalToolExecutor.describe(this,directTool);
+            recentReply="You: "+q+"\n\nSOURCE: VERIFIED ANDROID TOOL\n\nLonde: "+result;
+            if(londeReply!=null)londeReply.setText(recentReply);
+            wakeStatus("LOCAL PHONE TOOL");
+            speakLonde(result,"londe-tool-"+SystemClock.uptimeMillis());
+            return;
+        }
         if(PhoneAssistantActions.tryHandle(this,q,response -> {
             recentReply="You: "+q+"\n\nSOURCE: ANDROID PHONE SKILLS · ON DEVICE\n\nLonde: "+response;
             if(londeReply!=null)londeReply.setText(recentReply);
@@ -1365,7 +1374,7 @@ public final class MainActivity extends Activity {
             return;
         }
         LocalMemoryStore.countQuestion(this, q);
-        if (LocalBrainModels.installed(this) &&
+        if (LocalBrainModelCatalog.installed(this) &&
                 prefs.getBoolean("londe_local_brain_enabled", true)) {
             replyBusy = true;
             thinkingHum.begin();
@@ -1387,6 +1396,23 @@ public final class MainActivity extends Activity {
                     thinkingHum.stop();
                     if (fallback) { homeAskFallback(q); return; }
                     if (suggestedAction != null) {
+                        if(suggestedAction.startsWith("TOOL:")) {
+                            LocalToolPolicy.Call call=LocalToolPolicy.fromModel(q,
+                                    suggestedAction.substring(5));
+                            if(LocalToolExecutor.readOnly(call)) {
+                                String answer=LocalToolExecutor.describe(MainActivity.this,call);
+                                recentReply="You: "+q+"\n\nSOURCE: VERIFIED ANDROID TOOL\n\nLonde: "+answer;
+                                if(londeReply!=null)londeReply.setText(recentReply);
+                                wakeStatus("LOCAL PHONE TOOL");
+                                speakLonde(answer,"londe-tool-"+SystemClock.uptimeMillis());
+                                return;
+                            }
+                            if(call.kind==LocalToolPolicy.Kind.APP_REVIEW) {
+                                handleLondeAction("open "+call.argument);
+                                return;
+                            }
+                            homeAskFallback(q);return;
+                        }
                         String allowed = LondeCommands.normalize(suggestedAction);
                         if (allowed == null) { homeAskFallback(q); return; }
                         recentReply = "Local AI proposed: " + allowed + "\nReview before running.";
@@ -1399,7 +1425,7 @@ public final class MainActivity extends Activity {
                     homeContext.add(new LondeClient.Turn("user", q));
                     homeContext.add(new LondeClient.Turn("assistant", text));
                     while (homeContext.size() > 18) homeContext.remove(0);
-                    recentReply = "You: " + q + "\n\nSOURCE: QWEN3 0.6B · ON-DEVICE\n\nLonde: " + text;
+                    recentReply = "You: " + q + "\n\nSOURCE: " + LocalBrainModelCatalog.label(this) + " · ON-DEVICE\n\nLonde: " + text;
                     if (londeReply != null) londeReply.setText(recentReply);
                     wakeStatus(String.format(Locale.ROOT, "OFFLINE QWEN3 · %.1f TOK/S", speed));
                     if ("response".equals(aiScene) && "home".equals(page)) render();
@@ -2301,38 +2327,63 @@ public final class MainActivity extends Activity {
                 .setNegativeButton("Cancel", null).show();
     }
 
+    private void chooseLocalBrainModel() {
+        String[] options={
+                "Qwen3 0.6B · lightweight (~484 MB)",
+                "Qwen3 1.7B Q4 · stronger (~1.28 GB)"
+        };
+        int current=LocalBrainModelCatalog.LARGE.equals(
+                LocalBrainModelCatalog.selected(this))?1:0;
+        new AlertDialog.Builder(this).setTitle("Choose offline brain")
+                .setMessage("Model weights are downloaded only when you approve. "
+                        + "The larger model may answer better but uses more RAM and can be slower. "
+                        + "Switching a loaded model requires restarting Quiet.")
+                .setSingleChoiceItems(options,current,(dialog,which)->{
+                    try {
+                        LocalBrainModelCatalog.select(this,which==1
+                                ?LocalBrainModelCatalog.LARGE:LocalBrainModelCatalog.SMALL);
+                        dialog.dismiss();
+                        show("settings_ai");
+                    }catch(Exception e){
+                        dialog.dismiss();
+                        new AlertDialog.Builder(this).setTitle("Restart required")
+                                .setMessage(e.getMessage()).setPositiveButton("OK",null).show();
+                    }
+                }).setNegativeButton("Cancel",null).show();
+    }
+
     private void configureLocalBrain() {
-        String status = LocalBrainModels.status(this);
-        if (LocalBrainModels.installed(this)) {
+        String status = LocalBrainModelCatalog.status(this);
+        if (LocalBrainModelCatalog.installed(this)) {
             boolean enabled = prefs.getBoolean("londe_local_brain_enabled", true);
-            new AlertDialog.Builder(this).setTitle("Local Qwen3 AI · ready")
-                    .setMessage(status + "\n\nUses local llama.cpp inference for general questions. Complex or uncertain answers can use the existing ChatGPT connection. No local AI usage fees. The 0.6B model can be slow or unreliable.")
+            new AlertDialog.Builder(this).setTitle(LocalBrainModelCatalog.label(this) + " · ready")
+                    .setMessage(status + "\n\nUses local llama.cpp inference for general questions. Complex or uncertain answers can use the existing ChatGPT connection. No local AI usage fees. The larger model may be slower and use more memory.")
                     .setPositiveButton(enabled ? "Disable local AI" : "Enable local AI", (d,w) -> {
                         prefs.edit().putBoolean("londe_local_brain_enabled", !enabled).apply();
                         show("settings");
                     })
                     .setNeutralButton("Remove model", (d,w) -> new AlertDialog.Builder(this)
                             .setTitle("Delete local AI model?")
-                            .setMessage("Remove the ~484 MB model. Conversation settings stay intact. Reopen Quiet before deleting if the model has already been loaded.")
+                            .setMessage("Remove the selected model. Conversation settings stay intact. Reopen Quiet before deleting if the model has already been loaded.")
                             .setPositiveButton("Delete", (dialog, which) -> {
-                                try { LocalBrainModels.delete(this); show("settings"); }
+                                try { LocalBrainModelCatalog.delete(this); show("settings"); }
                                 catch (Exception e) { Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show(); }
                             }).setNegativeButton("Cancel", null).show())
                     .setNegativeButton("Cancel", null).show();
             return;
         }
-        if (LocalBrainModels.needsVerification(this)) {
+        if (LocalBrainModelCatalog.needsVerification(this)) {
             new AlertDialog.Builder(this).setTitle("Verify Qwen3 download")
                     .setMessage("Downloaded model found. Verify its SHA-256 before loading native inference. Verification runs on a background worker.")
                     .setPositiveButton("Verify", (d,w) -> verifyLocalBrain())
                     .setNegativeButton("Cancel", null).show();
             return;
         }
-        new AlertDialog.Builder(this).setTitle("Download local AI model")
-                .setMessage(status + "\n\nQwen3 0.6B 4-bit requires approximately 484 MB of download storage plus memory for inference. Downloads over Wi-Fi only. Your voice model remains unchanged. Nothing will download until you approve.")
+        new AlertDialog.Builder(this).setTitle("Download " + LocalBrainModelCatalog.label(this))
+                .setMessage(status + "\n\nModel: " + LocalBrainModelCatalog.label(this) + ". Requires storage and memory for inference. Downloads over Wi-Fi only. Your voice model remains unchanged. Nothing will download until you approve.")
                 .setPositiveButton("Download / Retry", (d,w) -> {
                     try {
-                        LocalBrainModels.startDownload(this);
+                        LocalBrainModelCatalog.startDownload(this);
                         Toast.makeText(this, "Local Qwen3 model queued · Wi-Fi only", Toast.LENGTH_LONG).show();
                         show("settings");
                     } catch (Exception e) {
@@ -2340,16 +2391,16 @@ public final class MainActivity extends Activity {
                     }
                 })
                 .setNeutralButton("Check status", (d,w) -> {
-                    Toast.makeText(this, LocalBrainModels.status(this), Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, LocalBrainModelCatalog.status(this), Toast.LENGTH_LONG).show();
                     show("settings");
                 }).setNegativeButton("Cancel", null).show();
     }
 
     private void verifyLocalBrain() {
-        Toast.makeText(this, "Verifying 484 MB model in background", Toast.LENGTH_LONG).show();
+        Toast.makeText(this, "Verifying selected offline model in background", Toast.LENGTH_LONG).show();
         background.execute(() -> {
             try {
-                LocalBrainModels.verify(this);
+                LocalBrainModelCatalog.verify(this);
                 handler.post(() -> {
                     if (!isFinishing() && !isDestroyed()) {
                         Toast.makeText(this, "Offline Qwen3 model verified · ready to test", Toast.LENGTH_LONG).show();
@@ -2419,7 +2470,7 @@ public final class MainActivity extends Activity {
     private void renderSettings() {
         v2SettingsHeader("Settings & Tools","Your assistant, your data, your rules.");
         v2SettingsGroup("◈","On-device brain","Manage your local AI model",
-                LocalBrainModels.status(this),"settings_ai");
+                LocalBrainModelCatalog.status(this),"settings_ai");
         v2SettingsGroup("◎","Memory","What Londe remembers and learns",
                 LocalMemoryStore.status(this),"settings_memory");
         v2SettingsGroup("▦","Tools & permissions","Control access to phone capabilities",
@@ -2441,15 +2492,17 @@ public final class MainActivity extends Activity {
             case "settings_ai": {
                 v2SettingsHeader("On-device brain","Manage your local AI without changing phone tools.");
                 LinearLayout p=v2Panel();
-                v2SettingRow(p,"◈","Qwen3 0.6B",LocalBrainModels.status(this),
-                        LocalBrainModels.installed(this)?"Installed":"Optional",this::configureLocalBrain);
+                v2SettingRow(p,"◈","Choose AI model",LocalBrainModelCatalog.label(this),
+                        "Offline",this::chooseLocalBrainModel);
+                v2SettingRow(p,"⬇","Manage / verify selected model",LocalBrainModelCatalog.status(this),
+                        LocalBrainModelCatalog.installed(this)?"Installed":"Optional",this::configureLocalBrain);
                 v2SettingRow(p,"✦","Test offline AI","Ask Londe without online inference",
                         "",()->{
-                            if(!LocalBrainModels.installed(this)){configureLocalBrain();return;}
+                            if(!LocalBrainModelCatalog.installed(this)){configureLocalBrain();return;}
                             openLonde();
                         });
                 add(main,p,17);
-                add(main,v2Caption("Additional models for Londe 2.0 are a future milestone; none are shown as installed."),15);
+                add(main,v2Caption("Qwen3 1.7B Q4 is experimental. Benchmark Hindi quality, battery and response speed on your Samsung before making it your default."),15);
                 break;
             }
             case "settings_memory": {
@@ -2633,11 +2686,11 @@ public final class MainActivity extends Activity {
                             !prefs.getBoolean("londe_thinking_hum",true)).apply();
                     render();
                 });
-        setting("On-device AI brain · Qwen3", LocalBrainModels.status(this),
+        setting("On-device AI brain · Qwen3", LocalBrainModelCatalog.status(this),
                 this::configureLocalBrain);
         setting("Test offline AI", "Ask Londe in airplane mode · watch for OFFLINE QWEN3",
                 () -> {
-                    if (!LocalBrainModels.installed(this)) {
+                    if (!LocalBrainModelCatalog.installed(this)) {
                         configureLocalBrain();
                         return;
                     }
