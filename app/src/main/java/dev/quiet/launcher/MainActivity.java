@@ -112,6 +112,8 @@ public final class MainActivity extends Activity {
     private boolean setupPromptScheduled;
     private long lastRefreshElapsed;
     private static final int REQ_WAKE_MIC=886;
+    private static final int REQ_CALENDAR=887;
+    private String pendingCalendarRequest;
     private OfflineWakePipeline homeWake;
     private int homeWakeGeneration;
     private boolean foregroundHome;
@@ -217,6 +219,20 @@ public final class MainActivity extends Activity {
 
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] grants){
         super.onRequestPermissionsResult(request,permissions,grants);
+        if (request == REQ_CALENDAR) {
+            String question=pendingCalendarRequest;
+            pendingCalendarRequest=null;
+            if(question != null) {
+                if(grants.length>0 && grants[0]==PackageManager.PERMISSION_GRANTED)
+                    homeAnswerCalendar(question);
+                else {
+                    recentReply="SOURCE: ANDROID CALENDAR · NO ACCESS\n\nCalendar access wasn't granted. I can't check your meetings or plans.";
+                    if(londeReply!=null)londeReply.setText(recentReply);
+                    wakeStatus("CALENDAR PERMISSION REQUIRED");
+                }
+            }
+            return;
+        }
         if (request == REQ_WAKE_MIC) {
             if (grants.length > 0 && grants[0] == PackageManager.PERMISSION_GRANTED) {
                 prefs.edit().putBoolean("londe_wake_enabled", true).apply();
@@ -820,6 +836,14 @@ public final class MainActivity extends Activity {
                 .setNegativeButton("Cancel",null).show();
     }
 
+    private void changeWakeSensitivity(boolean high) {
+        prefs.edit().putBoolean("londe_wake_high_sensitivity",high).apply();
+        stopWake();
+        LondeVoiceService.refreshWake();
+        handler.postDelayed(this::startWakeIfAllowed,750);
+        render();
+    }
+
     private void configureWake() {
         boolean enabled = prefs.getBoolean("londe_wake_enabled", false);
         if (!LondeKeywordDetector.available(this)) {
@@ -1082,12 +1106,41 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void homeAnswerCalendar(String question) {
+        stopWake();
+        if(checkSelfPermission(Manifest.permission.READ_CALENDAR)!=PackageManager.PERMISSION_GRANTED) {
+            pendingCalendarRequest=question;
+            wakeStatus("CALENDAR PERMISSION REQUIRED");
+            recentReply="SOURCE: ANDROID CALENDAR\\n\\nGrant calendar access to check your actual events. I won't guess your schedule.";
+            if(londeReply!=null)londeReply.setText(recentReply);
+            requestPermissions(new String[]{Manifest.permission.READ_CALENDAR},REQ_CALENDAR);
+            return;
+        }
+        replyBusy=true;
+        wakeStatus("READING ANDROID CALENDAR");
+        background.execute(()->{
+            String answer=LocalCalendarReader.read(this,question);
+            handler.post(()->{
+                if(isFinishing()||isDestroyed())return;
+                replyBusy=false;
+                recentReply="You: "+question+"\\n\\nSOURCE: ANDROID CALENDAR · ON-DEVICE\\n\\nLonde: "+answer;
+                if(londeReply!=null)londeReply.setText(recentReply);
+                wakeStatus("CALENDAR CHECK COMPLETE");
+                speakLonde(answer,"londe-calendar-"+SystemClock.uptimeMillis());
+            });
+        });
+    }
+
     private void homeAsk(String request){
         String q=request==null?"":request.trim();
         if(q.isEmpty())return;
         if(replyBusy){wakeStatus("BUSY · TRY AGAIN");return;}
         stopWake();
         if(q.length()>700){wakeStatus("REQUEST TOO LONG");return;}
+        if(CalendarIntent.isPersonalSchedule(q)) {
+            homeAnswerCalendar(q);
+            return;
+        }
         LocalFirstRouter.Decision routing = LocalFirstRouter.route(q);
         if (routing.kind == LocalFirstRouter.Kind.LOCAL_ANSWER) {
             String response = LocalFirstRouter.localAnswer(routing,
@@ -2115,6 +2168,15 @@ public final class MainActivity extends Activity {
                 : prefs.getBoolean("londe_wake_enabled",false)
                     ? "On · offline keyword spotter" : "Off · tap to enable Hey Londe",
                 () -> configureWake());
+        setting("Hey Londe sensitivity",
+                prefs.getBoolean("londe_wake_high_sensitivity",true)
+                    ? "High · easier to trigger, may cause false alarms" : "Standard · fewer false alarms",
+                () -> new AlertDialog.Builder(this)
+                    .setTitle("Hey Londe sensitivity")
+                    .setMessage("The current English-trained keyword model may struggle with Hinglish pronunciation. High sensitivity can help, but may also activate unexpectedly. Change only when needed.")
+                    .setPositiveButton("High", (d,w) -> changeWakeSensitivity(true))
+                    .setNeutralButton("Standard", (d,w) -> changeWakeSensitivity(false))
+                    .setNegativeButton("Cancel",null).show());
         setting("Test Hey Londe detector", "Foreground test · shows model and mic errors",
             () -> {
                 Intent diagnostic = new Intent(this, LondeActivity.class);

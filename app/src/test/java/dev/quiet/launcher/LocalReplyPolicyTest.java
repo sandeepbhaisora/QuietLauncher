@@ -26,6 +26,15 @@ public final class LocalReplyPolicyTest {
                 "Static educational questions must not be falsely treated as live");
         check(LocalReplyPolicy.offlineMessage().contains("didn't contact ChatGPT"),
                 "Offline failure should truthfully disclose no cloud call");
+        check(!LocalReplyPolicy.usableLocalAnswer("kya haal chaal ho rahe",
+                "Hello! How can I assist you today?"),
+                "Canned response must not be accepted");
+        check(!LocalReplyPolicy.usableLocalAnswer("do I have any meetings today scheduled",
+                "Today is Tuesday, November 3, 2026."),
+                "Personal meeting questions cannot receive an invented day");
+        check(!LocalReplyPolicy.usableLocalAnswer("kya hal chaal ho rahe",
+                "Yes, today is Tuesday, November 3, 2026."),
+                "Irrelevant date must be rejected");
         System.out.println("LocalReplyPolicyTest OK");
     }
 }

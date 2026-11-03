@@ -75,9 +75,14 @@ final class LondeKeywordDetector implements OfflineWakePipeline.Detector {
         config.setFeatConfig(features);
         config.setModelConfig(model);
         config.setKeywordsFile(new File(folder, FILES[4]).getAbsolutePath());
-        config.setKeywordsThreshold(0.28f);
-        config.setKeywordsScore(1.8f);
-        config.setNumTrailingBlanks(2);
+        // Higher sensitivity may help accents not well represented in the
+        // English-trained GigaSpeech model. It increases false-positive risk.
+        boolean sensitive=context.getSharedPreferences("quiet_local_v1",Context.MODE_PRIVATE)
+                .getBoolean("londe_wake_high_sensitivity", true);
+        config.setMaxActivePaths(sensitive ? 8 : 4);
+        config.setKeywordsThreshold(sensitive ? 0.16f : 0.28f);
+        config.setKeywordsScore(sensitive ? 2.2f : 1.8f);
+        config.setNumTrailingBlanks(sensitive ? 1 : 2);
         kws = new KeywordSpotter(null, config);
         stream = kws.createStream("");
     }
