@@ -377,7 +377,7 @@ public final class LondeActivity extends Activity {
     private String answerSource = "LONDE · LOCAL TOOLS";
     private void showAnswer(String result) {
         currentAnswer=result;
-        answer.setText("SOURCE  /  " + answerSource + "\\n\\n" + result);
+        answer.setText("SOURCE  /  " + answerSource + "\n\n" + result);
         answerScroll.post(()->answerScroll.scrollTo(0,0));
     }
     private void localAnswer(String request,String response) {
@@ -464,6 +464,11 @@ public final class LondeActivity extends Activity {
                                 setPhase(Phase.READY, "HEY LONDE DETECTED!");
                                 showAnswer("Wake phrase detected locally. Starting speech recognition…");
                                 ui.postDelayed(LondeActivity.this::ensureListening, 500);
+                            }
+                            @Override public void onAudioLevel(int level) {
+                                if(wakeDiagnostic!=null && !isFinishing())
+                                    setPhase(Phase.LISTENING,
+                                            "WAKE TEST · MIC " + level + "% · SAY HEY LONDE");
                             }
                             @Override public void onError(String reason) {
                                 wakeDiagnostic = null;
