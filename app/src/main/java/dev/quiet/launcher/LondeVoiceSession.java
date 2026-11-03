@@ -18,7 +18,7 @@ public final class LondeVoiceSession extends VoiceInteractionSession {
             Intent intent = new Intent(getContext(), LondeActivity.class);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             intent.putExtra("auto_listen", true);
-            startAssistantActivity(intent);
+            startVoiceActivity(intent);
             hide();
         } catch (Exception error) {
             Log.e(TAG, "Unable to launch Londe assistant UI", error);
