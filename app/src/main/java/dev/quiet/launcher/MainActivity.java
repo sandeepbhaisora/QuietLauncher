@@ -339,7 +339,8 @@ public final class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        if (!page.equals("home")) show("home");
+        if(page.startsWith("settings_"))show("settings");
+        else if (!page.equals("home")) show("home");
         // Home screens should stay on screen, not reveal a blank Activity.
     }
 
@@ -425,7 +426,7 @@ public final class MainActivity extends Activity {
     private void render() {
         if (prefs == null) return;
         setPalette(); focusLive = null; clockLive = null;
-        shell = column(); shell.setBackgroundColor("home".equals(page) ? c("#041322") : bg);
+        shell = column(); shell.setBackgroundColor(("home".equals(page)||page.startsWith("settings")) ? V2_BG : bg);
         shell.setPadding(dp(18), dp(7), dp(18), dp(6));
         // Android 15+ draws behind system bars by default. Respect both insets.
         shell.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -455,7 +456,7 @@ public final class MainActivity extends Activity {
             next.setContentDescription("Next screen");
             top.addView(next);
         }
-        if (!"home".equals(page)) shell.addView(top);
+        if (!"home".equals(page) && !page.startsWith("settings")) shell.addView(top);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(false); scroll.setVerticalScrollBarEnabled(false);
         main = column(); main.setPadding(dp(1), 0, dp(1), dp(14));
@@ -470,35 +471,37 @@ public final class MainActivity extends Activity {
             case "inbox": renderInbox(); break;
             case "usage": renderUsage(); break;
             case "widgets": renderWidgets(); break;
+            case "settings_ai": case "settings_memory": case "settings_tools":
+            case "settings_voice": case "settings_phone": case "settings_advanced":
+                renderSettingsDetails(); break;
             default: renderSettings(); break;
         }
-        if (!"home".equals(page)) shell.addView(bottomNav());
+        // Fixed bottom navigation keeps Home / Londe / Apps / Settings accessible.
+        shell.addView(bottomNav());
         // Build the whole screen detached, then attach once per navigation.
         setContentView(shell);
     }
 
     private LinearLayout bottomNav() {
-        LinearLayout nav = row();
-        nav.setPadding(dp(1), dp(7), dp(1), dp(3));
-        View border = new View(this);
-        border.setBackgroundColor(line);
-        shell.addView(border, new LinearLayout.LayoutParams(-1, dp(1)));
-        String[][] tabs = {{"⌂", "Home", "home"}, {"▦", "Apps", "apps"},
-                {"◷", "Day", "root"}, {"▤", "Chats", "inbox"}, {"⚙", "Settings", "settings"}};
-        for (String[] tab : tabs) {
-            boolean active = page.equals(tab[2]) || (page.equals("widgets") && tab[2].equals("root"));
-            LinearLayout cell = column();
-            cell.setGravity(Gravity.CENTER);
-            cell.setContentDescription(tab[1]);
-            TextView symbol = text(tab[0], 19, active ? ink : muted, false);
-            symbol.setGravity(Gravity.CENTER);
-            TextView name = text(tab[1], 10, active ? ink : muted, active);
-            name.setGravity(Gravity.CENTER);
-            cell.addView(symbol);
-            cell.addView(name);
-            if (active) cell.setBackground(shape(surface2, 13, 0));
-            nav.addView(cell, new LinearLayout.LayoutParams(0, dp(54), 1));
-            cell.setOnClickListener(v -> show(tab[2]));
+        LinearLayout nav=row();
+        nav.setPadding(dp(4),dp(9),dp(4),dp(8));
+        nav.setBackground(v2Shape(V2_SURFACE_LIGHT,V2_SURFACE,24,V2_LINE));
+        String[][] tabs={{"⌂","Home","home"},{"✦","Londe","assistant"},
+                {"▦","Apps","apps"},{"⚙","Settings","settings"}};
+        for(String[] tab:tabs){
+            boolean active=("settings".equals(tab[2]) && page.startsWith("settings"))
+                    || page.equals(tab[2]);
+            LinearLayout item=column();item.setGravity(Gravity.CENTER);
+            TextView icon=text(tab[0],21,active?V2_MINT:V2_DIM,true);
+            icon.setGravity(Gravity.CENTER);
+            TextView title=text(tab[1],11,active?V2_MINT:V2_TEXT,active);
+            title.setGravity(Gravity.CENTER);
+            item.addView(icon);item.addView(title);
+            nav.addView(item,new LinearLayout.LayoutParams(0,dp(52),1));
+            item.setOnClickListener(v->{
+                if("assistant".equals(tab[2]))openLonde();
+                else show(tab[2]);
+            });
         }
         return nav;
     }
@@ -534,129 +537,200 @@ public final class MainActivity extends Activity {
         // User action only; this is NOT continuous wake-word recognition.
         startVoiceInput();
     }
-    private void renderAiHome() {
-        main.setPadding(dp(5),dp(2),dp(5),dp(24));
-        main.setBackgroundColor(c("#041322"));
-        if("standby".equals(aiScene)){
-            TextView clock=aiText(new SimpleDateFormat("HH:mm",Locale.getDefault())
-                    .format(new Date()),58,AI_WHITE,false,true);
-            clockLive=clock;
-            add(main,clock,20);
-            add(main,aiText(new SimpleDateFormat("EEE, MMM d",Locale.getDefault())
-                    .format(new Date()),15,AI_DIM,false,true),2);
-            AiSceneView art=new AiSceneView(this,AiSceneView.Scene.STANDBY);
-            main.addView(art,new LinearLayout.LayoutParams(-1,dp(360)));
-            add(main,aiText("Waiting for you…",19,AI_WHITE,true,true),12);
-            add(main,aiText("Tap the core to open Londe",12,AI_DIM,false,true),4);
-            art.setOnClickListener(v->aiScene("hub"));
-            add(main,aiButton("OPEN AI HOME  ↗",()->aiScene("hub")),24);
-            add(main,aiButton("APPS   ▦",()->show("apps")),9);
-            return;
-        }
-        if("listening".equals(aiScene)){
-            add(main,aiText("VOICE INPUT  /  ACTIVATED BY TAP",11,AI_CYAN,true,true),16);
-            AiSceneView art=new AiSceneView(this,AiSceneView.Scene.LISTENING);
-            main.addView(art,new LinearLayout.LayoutParams(-1,dp(425)));
-            add(main,aiText("Listening…",29,AI_WHITE,true,true),6);
-            add(main,aiText("Speak into your microphone.",14,AI_DIM,false,true),12);
-            add(main,aiText("Android speech recognition may use a network service.",11,AI_DIM,false,true),14);
-            add(main,aiButton("CANCEL / HOME",()->aiScene("hub")),30);
-            return;
-        }
-        if("response".equals(aiScene)){
-            add(main,aiText("LONDE  /  RESPONSE",13,AI_CYAN,true,true),16);
-            AiSceneView art=new AiSceneView(this,AiSceneView.Scene.RESPONSE);
-            main.addView(art,new LinearLayout.LayoutParams(-1,dp(265)));
-            LinearLayout panel=column();
-            panel.setPadding(dp(16),dp(18),dp(16),dp(18));
-            panel.setBackground(shape(c("#0C3044"),4,c("#1D9AB7")));
-            add(panel,aiText("✦  LONDE",14,AI_CYAN,true,false),0);
-            londeStatus=aiText(wakeState,11,AI_DIM,true,false);
-            add(panel,londeStatus,9);
-            londeReply=aiText(recentReply,16,AI_WHITE,false,false);
-            add(panel,londeReply,13);
-            add(main,panel,12);
-            add(main,aiButton("ASK SOMETHING ELSE",this::aiSceneListen),16);
-            add(main,aiButton("BACK TO HOME",()->aiScene("hub")),8);
-            return;
-        }
-        LinearLayout header=row();
-        TextView logo=aiText("QUIET OS",17,AI_WHITE,true,false);
-        header.addView(logo,new LinearLayout.LayoutParams(0,dp(38),1));
-        header.addView(aiButton("◉  STANDBY",()->aiScene("standby")));
-        add(main,header,9);
+    private static final int V2_BG = 0xff071510;
+    private static final int V2_SURFACE = 0xff112b24;
+    private static final int V2_SURFACE_LIGHT = 0xff173a2f;
+    private static final int V2_MINT = 0xffa4f6c5;
+    private static final int V2_LINE = 0xff315b49;
+    private static final int V2_TEXT = 0xffeffbf3;
+    private static final int V2_DIM = 0xffa0bdad;
 
-        LinearLayout identity=row();
-        AiSceneView avatar=new AiSceneView(this,AiSceneView.Scene.HUB);
-        identity.addView(avatar,new LinearLayout.LayoutParams(dp(86),dp(90)));
-        LinearLayout intro=column();
-        add(intro,aiText("Londe",25,AI_WHITE,true,false),5);
-        add(intro,aiText("Your AI companion",12,AI_DIM,false,false),5);
-        identity.addView(intro,new LinearLayout.LayoutParams(0,-2,1));
-        TextView settings=aiButton("⚙",()->show("settings"));
-        identity.addView(settings);
-        add(main,identity,14);
-        add(main,aiText("GOOD TO SEE YOU.",12,AI_CYAN,true,true),14);
-        add(main,aiText("Ready when you are.",19,AI_WHITE,false,true),8);
-
-        AiSceneView globe=new AiSceneView(this,AiSceneView.Scene.HUB);
-        globe.setOnClickListener(v->openLonde());
-        globe.setContentDescription("Animated Londe holographic AI core");
-        main.addView(globe,new LinearLayout.LayoutParams(-1,dp(205)));
-
-        LinearLayout actions=row();
-        String[] names={"TRAINING","FOCUS","USAGE","ASSISTANT"};
-        Runnable[] handlers={this::openTraining,this::focusDialog,()->show("usage"),this::openLonde};
-        for(int i=0;i<4;i++){
-            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(55),1);
-            if(i!=0)lp.leftMargin=dp(6);
-            actions.addView(aiButton(names[i],handlers[i]),lp);
-        }
-        add(main,actions,14);
-        add(main,aiButton("⌨  TYPE OR ASK LONDE",()->{
-            EditText question=new EditText(this);
-            question.setSingleLine(false);
-            question.setHint("Ask a question or request an action");
-            new AlertDialog.Builder(this).setTitle("Ask Londe")
+    private GradientDrawable v2Shape(int start, int end, int radius, int stroke) {
+        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{start, end});
+        d.setCornerRadius(dp(radius));
+        if(stroke!=0)d.setStroke(dp(1),stroke);
+        return d;
+    }
+    private LinearLayout v2Panel() {
+        LinearLayout p = column();
+        p.setPadding(dp(17),dp(17),dp(17),dp(17));
+        p.setBackground(v2Shape(V2_SURFACE_LIGHT,V2_SURFACE,23,V2_LINE));
+        return p;
+    }
+    private TextView v2Text(String label,int size,boolean bold) {
+        return text(label,size,V2_TEXT,bold);
+    }
+    private TextView v2Caption(String label) {
+        return text(label,12,V2_DIM,false);
+    }
+    private TextView v2Pill(String label,Runnable action) {
+        TextView b=text(label,13,V2_TEXT,true);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(15),dp(12),dp(15),dp(12));
+        b.setBackground(v2Shape(V2_SURFACE_LIGHT,V2_SURFACE,22,V2_LINE));
+        b.setOnClickListener(v->action.run());
+        return b;
+    }
+    private void v2AskByTyping(){
+        EditText question=new EditText(this);
+        question.setTextColor(V2_TEXT);
+        question.setHintTextColor(V2_DIM);
+        question.setHint("Ask Londe anything…");
+        question.setMinLines(2);
+        question.setPadding(dp(18),dp(15),dp(18),dp(15));
+        new AlertDialog.Builder(this).setTitle("Ask Londe")
                 .setView(question).setNegativeButton("Cancel",null)
-                .setPositiveButton("Send",(d,w)->{
+                .setPositiveButton("Ask",(d,w)->{
+                    String q=question.getText().toString().trim();
+                    if(q.isEmpty())return;
                     aiScene="response";
                     render();
-                    homeAsk(question.getText().toString());
+                    homeAsk(q);
                 }).show();
-        }),10);
+    }
 
-        LinearLayout today=column();
-        today.setPadding(dp(15),dp(14),dp(15),dp(15));
-        today.setBackground(shape(c("#092538"),4,c("#1C6A83")));
-        add(today,aiText("TODAY AT A GLANCE",13,AI_WHITE,true,false),0);
-        add(today,aiText("Workout  ·  "+(activeTrainingSets()>0
-                ? activeTrainingSets()+" active sets" : "Ready to train"),13,AI_DIM,false,false),13);
-        add(today,aiText("Focus  ·  "+(focusActive()?remainingFocus():"Not started"),
-                13,AI_DIM,false,false),8);
-        londeStatus=aiText(wakeState,12,AI_CYAN,true,false);
-        add(today,londeStatus,12);
-        londeReply=aiText(recentReply,13,AI_WHITE,false,false);
-        londeReply.setMaxLines(3);
-        add(today,londeReply,7);
-        londeHeard=aiText(wakeLastHeard,11,AI_DIM,false,false);
-        add(today,londeHeard,5);
-        add(main,today,15);
-
-        LinearLayout dock=row();
-        String[] labels={"PHONE","APPS","SPEAK","WORK","SETTINGS"};
-        Runnable[] nav={()->show("apps"),()->show("apps"),this::aiSceneListen,
-                this::openWorkspace,()->show("settings")};
-        for(int i=0;i<nav.length;i++){
-            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(55),1);
-            if(i!=0)lp.leftMargin=dp(5);
-            dock.addView(aiButton(labels[i],nav[i]),lp);
+    private void v2QuickTile(LinearLayout parent,String icon,String title,String subtitle,Runnable action){
+        LinearLayout tile=column();
+        tile.setPadding(dp(11),dp(12),dp(10),dp(13));
+        tile.setBackground(v2Shape(V2_SURFACE_LIGHT,V2_SURFACE,17,V2_LINE));
+        add(tile,text(icon,22,V2_MINT,true),0);
+        add(tile,text(title,13,V2_TEXT,true),9);
+        TextView sub=v2Caption(subtitle);sub.setMaxLines(2);add(tile,sub,3);
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(105),1);
+        if(parent.getChildCount()>0)lp.leftMargin=dp(7);
+        parent.addView(tile,lp);
+        tile.setOnClickListener(v->action.run());
+    }
+    private void renderAiHome() {
+        main.setPadding(dp(4),dp(6),dp(4),dp(22));
+        main.setBackgroundColor(V2_BG);
+        if ("response".equals(aiScene)) {
+            add(main,v2Text("✦  Londe",27,true),10);
+            add(main,v2Caption("Your private assistant · response"),7);
+            LondeOrbView orb=new LondeOrbView(this);
+            orb.setState(replyBusy?"thinking":"speaking");
+            orb.setOnClickListener(v->openLonde());
+            main.addView(orb,new LinearLayout.LayoutParams(-1,dp(185)));
+            LinearLayout response=v2Panel();
+            londeStatus=text(wakeState,12,V2_MINT,true);
+            add(response,londeStatus,0);
+            londeReply=v2Text(recentReply,16,false);
+            londeReply.setLineSpacing(dp(4),1f);
+            add(response,londeReply,13);
+            add(main,response,7);
+            add(main,v2Pill("✦  Talk to Londe",this::openLonde),18);
+            add(main,v2Pill("⌨  Type another question",this::v2AskByTyping),9);
+            add(main,v2Pill("←  Back home",()->aiScene("hub")),9);
+            return;
         }
-        add(main,dock,14);
-        add(main,aiText(prefs.getBoolean("londe_wake_enabled",false)
-                ? "HEY LONDE enabled · say the wake phrase" : "Enable Hey Londe in Settings for voice activation.",
-                11,AI_DIM,false,true),10);
-        add(main,aiButton("CLASSIC HOME",()->show("classic")),11);
+        if ("listening".equals(aiScene)) {
+            add(main,v2Text("Listening…",28,true),20);
+            LondeOrbView orb=new LondeOrbView(this);orb.setState("listening");
+            main.addView(orb,new LinearLayout.LayoutParams(-1,dp(280)));
+            add(main,v2Caption("Speak naturally. You remain in control."),9);
+            add(main,v2Pill("Cancel",()->aiScene("hub")),23);
+            return;
+        }
+        if ("standby".equals(aiScene)) { aiScene="hub"; }
+        LinearLayout header=row();
+        LinearLayout brand=column();
+        add(brand,text("✦  Londe",26,V2_TEXT,true),0);
+        add(brand,text("Q U I E T L A U N C H E R",10,V2_DIM,true),4);
+        header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
+        header.addView(v2Pill("⚙",()->show("settings")));
+        add(main,header,13);
+
+        int hour=java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
+        String greeting=hour<12?"Good morning":hour<17?"Good afternoon":"Good evening";
+        add(main,v2Text(greeting+",",29,true),32);
+        add(main,text("Londe is ready.",15,V2_DIM,false),4);
+        String modelState=LocalBrainModels.installed(this)
+                ? "●  Offline brain ready":"○  Download local brain";
+        TextView model=v2Pill(modelState,()->show("settings_ai"));
+        model.setTextColor(V2_MINT);
+        add(main,model,16);
+
+        LondeOrbView orb=new LondeOrbView(this);
+        orb.setState("ready");
+        orb.setContentDescription("Talk to Londe by voice");
+        orb.setOnClickListener(v->openLonde());
+        main.addView(orb,new LinearLayout.LayoutParams(-1,dp(247)));
+        TextView hint=v2Text("Say “Hey Londe”",18,true);
+        hint.setGravity(Gravity.CENTER);
+        add(main,hint,0);
+        TextView note=text(prefs.getBoolean("londe_wake_enabled",false)
+                ? "VOICE WAKE ENABLED  ·  TAP OR SPEAK"
+                : "TAP TO TALK  ·  WAKE WORD OFF",11,V2_DIM,true);
+        note.setGravity(Gravity.CENTER);
+        add(main,note,5);
+
+        LinearLayout commands=row();
+        TextView type=v2Pill("⌨  Type",this::v2AskByTyping);
+        commands.addView(type,new LinearLayout.LayoutParams(0,dp(49),1));
+        TextView mic=v2Pill("🎙  Talk",this::openLonde);
+        LinearLayout.LayoutParams mc=new LinearLayout.LayoutParams(0,dp(49),1);mc.leftMargin=dp(8);
+        commands.addView(mic,mc);
+        TextView all=v2Pill("▦  Apps",()->show("apps"));
+        LinearLayout.LayoutParams ac=new LinearLayout.LayoutParams(0,dp(49),1);ac.leftMargin=dp(8);
+        commands.addView(all,ac);
+        add(main,commands,22);
+
+        LinearLayout chips=row();
+        v2QuickTile(chips,"◈","On-device",LocalBrainModels.installed(this)
+                ? "Qwen3 local AI":"Model not installed",()->show("settings_ai"));
+        v2QuickTile(chips,"▤","Memory",LocalMemoryStore.enabled(this)
+                ? "Saved locally":"Off by default",()->show("settings_memory"));
+        v2QuickTile(chips,"▦","Tools","Apps & actions",()->show("settings_tools"));
+        add(main,chips,14);
+
+        LinearLayout glance=row();
+        LinearLayout today=v2Panel();
+        add(today,text("◷  TODAY",12,V2_MINT,true),0);
+        add(today,text(new SimpleDateFormat("EEE, d MMM",Locale.getDefault())
+                .format(new Date()),17,V2_TEXT,true),10);
+        add(today,v2Caption("View calendar"),5);
+        today.setOnClickListener(v->startSafe(
+                new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALENDAR)));
+        glance.addView(today,new LinearLayout.LayoutParams(0,dp(128),1));
+        LinearLayout focus=v2Panel();
+        add(focus,text("◎  FOCUS",12,V2_MINT,true),0);
+        add(focus,text(focusActive()?remainingFocus():"25 min",18,V2_TEXT,true),10);
+        add(focus,v2Caption(focusActive()?"In progress":"Start a session"),5);
+        focus.setOnClickListener(v->focusDialog());
+        LinearLayout.LayoutParams fc=new LinearLayout.LayoutParams(0,dp(128),1);fc.leftMargin=dp(9);
+        glance.addView(focus,fc);
+        add(main,glance,21);
+
+        LinearLayout recent=v2Panel();
+        add(recent,text("✧  RECENT ASSISTANT ACTIVITY",12,V2_MINT,true),0);
+        TextView summary=v2Caption(recentReply);
+        summary.setMaxLines(3);
+        add(recent,summary,9);
+        recent.setOnClickListener(v->aiScene("response"));
+        add(main,recent,10);
+
+        add(main,v2Text("Your essentials",17,true),24);
+        LinearLayout shortcut=row();
+        String[] icons={"▤","◷","♫","⌖","◎"};
+        String[] names={"Chats","Calendar","Music","Maps","Camera"};
+        String[] q={"Open WhatsApp","Open Calendar","Open Music","Open Maps","Open Camera"};
+        for(int i=0;i<icons.length;i++){
+            final String command=q[i];
+            LinearLayout tile=column();tile.setGravity(Gravity.CENTER);
+            TextView glyph=text(icons[i],23,V2_MINT,true);glyph.setGravity(Gravity.CENTER);
+            glyph.setBackground(v2Shape(V2_SURFACE_LIGHT,V2_SURFACE,17,V2_LINE));
+            tile.addView(glyph,new LinearLayout.LayoutParams(dp(51),dp(51)));
+            TextView label=text(names[i],11,V2_TEXT,false);label.setGravity(Gravity.CENTER);
+            add(tile,label,6);
+            shortcut.addView(tile,new LinearLayout.LayoutParams(0,dp(82),1));
+            tile.setOnClickListener(v->{
+                aiScene="response";render();homeAsk(command);
+            });
+        }
+        add(main,shortcut,13);
+        add(main,v2Pill("All apps  ↑",()->show("apps")),13);
+        add(main,v2Pill("Settings & tools  →",()->show("settings")),9);
     }
 
     private LinearLayout smartTile(String title, String detail, String icon, Runnable action) {
@@ -2293,7 +2367,207 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void v2SettingRow(LinearLayout parent,String symbol,String title,
+                              String subtitle,String status,Runnable action) {
+        LinearLayout item=row();
+        item.setPadding(dp(5),dp(14),dp(5),dp(14));
+        TextView glyph=text(symbol,21,V2_MINT,true);
+        glyph.setGravity(Gravity.CENTER);
+        item.addView(glyph,new LinearLayout.LayoutParams(dp(36),dp(38)));
+        LinearLayout labels=column();
+        add(labels,text(title,15,V2_TEXT,true),0);
+        if(subtitle!=null&&!subtitle.isEmpty())add(labels,text(subtitle,12,V2_DIM,false),3);
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);lp.leftMargin=dp(8);
+        item.addView(labels,lp);
+        if(status!=null&&!status.isEmpty()) {
+            TextView state=text(status,11,V2_MINT,true);
+            state.setMaxLines(2);
+            state.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);
+            item.addView(state,new LinearLayout.LayoutParams(dp(90),-2));
+        }
+        item.addView(text("  ›",22,V2_DIM,false));
+        parent.addView(item);
+        item.setOnClickListener(v->action.run());
+        View lineView=new View(this);lineView.setBackgroundColor(V2_LINE);
+        parent.addView(lineView,new LinearLayout.LayoutParams(-1,dp(1)));
+    }
+    private void v2SettingsGroup(String symbol,String title,String subtitle,
+                                 String status,String target){
+        LinearLayout group=v2Panel();
+        LinearLayout header=row();
+        TextView emblem=text(symbol,27,V2_MINT,true);
+        header.addView(emblem,new LinearLayout.LayoutParams(dp(48),-2));
+        LinearLayout labels=column();
+        add(labels,text(title,20,V2_TEXT,true),0);
+        add(labels,text(subtitle,12,V2_DIM,false),5);
+        header.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+        header.addView(text("›",26,V2_MINT,false));
+        group.addView(header);
+        if(status!=null){
+            TextView line=text(status,12,V2_MINT,true);
+            add(group,line,12);
+        }
+        group.setOnClickListener(v->show(target));
+        add(main,group,13);
+    }
+    private void v2SettingsHeader(String title,String subtitle){
+        main.setBackgroundColor(V2_BG);
+        main.setPadding(dp(4),dp(8),dp(4),dp(28));
+        add(main,text(title,29,V2_TEXT,true),12);
+        add(main,text(subtitle,13,V2_DIM,false),5);
+    }
     private void renderSettings() {
+        v2SettingsHeader("Settings & Tools","Your assistant, your data, your rules.");
+        v2SettingsGroup("◈","On-device brain","Manage your local AI model",
+                LocalBrainModels.status(this),"settings_ai");
+        v2SettingsGroup("◎","Memory","What Londe remembers and learns",
+                LocalMemoryStore.status(this),"settings_memory");
+        v2SettingsGroup("▦","Tools & permissions","Control access to phone capabilities",
+                null,"settings_tools");
+        v2SettingsGroup("🎙","Voice & online fallback","Wake, speech and GPT permissions",
+                prefs.getBoolean("londe_wake_enabled",false)
+                    ? "Hey Londe enabled":"Wake phrase off","settings_voice");
+        v2SettingsGroup("⌂","Phone & appearance","Launcher, privacy and essential apps",
+                null,"settings_phone");
+
+        LinearLayout privacy=v2Panel();
+        add(privacy,text("♧  Designed for private use",15,V2_TEXT,true),0);
+        add(privacy,v2Caption("Local memory stays on your phone. GPT online is used only after spoken permission."),9);
+        add(main,privacy,20);
+        add(main,v2Pill("See every setting  →",()->show("settings_advanced")),13);
+    }
+    private void renderSettingsDetails(){
+        switch(page){
+            case "settings_ai": {
+                v2SettingsHeader("On-device brain","Manage your local AI without changing phone tools.");
+                LinearLayout p=v2Panel();
+                v2SettingRow(p,"◈","Qwen3 0.6B",LocalBrainModels.status(this),
+                        LocalBrainModels.installed(this)?"Installed":"Optional",this::configureLocalBrain);
+                v2SettingRow(p,"✦","Test offline AI","Ask Londe without online inference",
+                        "",()->{
+                            if(!LocalBrainModels.installed(this)){configureLocalBrain();return;}
+                            openLonde();
+                        });
+                add(main,p,17);
+                add(main,v2Caption("Additional models for Londe 2.0 are a future milestone; none are shown as installed."),15);
+                break;
+            }
+            case "settings_memory": {
+                v2SettingsHeader("Memory","Review and control what Londe remembers.");
+                LinearLayout p=v2Panel();
+                v2SettingRow(p,"◎","On-device memory",
+                        LocalMemoryStore.status(this),"",
+                        this::configureLocalMemory);
+                v2SettingRow(p,"▤","Review saved memories","Inspect notes and question categories",
+                        "",()->new AlertDialog.Builder(this)
+                                .setTitle("Saved on this device")
+                                .setMessage(LocalMemoryStore.describe(this))
+                                .setPositiveButton("Done",null).show());
+                v2SettingRow(p,"⌫","Clear memory","Erase saved notes and recent context",
+                        "",()->new AlertDialog.Builder(this)
+                                .setTitle("Clear Londe memory?")
+                                .setMessage("Delete all saved notes and question interests? This cannot be undone.")
+                                .setPositiveButton("Clear",(d,w)->{
+                                    LocalMemoryStore.clear(this);
+                                    LocalSessionContext.clear();
+                                    homeContext.clear();
+                                    homeOnlineContext.clear();
+                                    render();
+                                }).setNegativeButton("Cancel",null).show());
+                add(main,p,17);
+                break;
+            }
+            case "settings_tools": {
+                v2SettingsHeader("Tools & permissions","Use Android capabilities with permission.");
+                LinearLayout p=v2Panel();
+                v2SettingRow(p,"▦","Apps","Open installed applications",
+                        "Local",()->show("apps"));
+                v2SettingRow(p,"◷","Calendar","Read events when Android allows",
+                        checkSelfPermission(Manifest.permission.READ_CALENDAR)
+                                ==PackageManager.PERMISSION_GRANTED?"Allowed":"Permission",
+                        ()->openLonde());
+                v2SettingRow(p,"▤","Messages","Open SMS and WhatsApp drafts",
+                        "Review",this::openLonde);
+                v2SettingRow(p,"♧","Notifications",
+                        LondeNotificationListener.includedInBuild(this)
+                                ? "Optional Android notification permission"
+                                : "Unavailable in standard APK",
+                        LondeNotificationListener.includedInBuild(this)?"Optional":"Limited",
+                        ()->PhoneAssistantActions.requestNotificationAccess(this));
+                v2SettingRow(p,"◎","Focus sessions","Start a distraction-free timer",
+                        "",this::focusDialog);
+                add(main,p,17);
+                break;
+            }
+            case "settings_voice": {
+                v2SettingsHeader("Voice & online fallback","Choose how Londe listens and replies.");
+                LinearLayout p=v2Panel();
+                v2SettingRow(p,"🎙","Wake word",
+                        prefs.getBoolean("londe_wake_enabled",false)?"Hey Londe enabled":"Enable microphone wake",
+                        "",this::configureWake);
+                v2SettingRow(p,"✦","Wake phrase",
+                        prefs.getBoolean("londe_wake_short_enabled",false)
+                            ? "Hey Londe or Londe (experimental)":"Hey Londe only",
+                        "",this::configureWakeKeyword);
+                v2SettingRow(p,"◉","Wake sensitivity","Adjust how often Londe hears you",
+                        "",()->new AlertDialog.Builder(this)
+                                .setTitle("Wake sensitivity")
+                                .setItems(new String[]{"Standard","High"},
+                                        (d,i)->changeWakeSensitivity(i==1))
+                                .setNegativeButton("Cancel",null).show());
+                v2SettingRow(p,"◖","Offline speech","Supertonic or Android voice",
+                        "",this::configureLondeVoice);
+                v2SettingRow(p,"♫","Voice quality","Speech speaker and speed",
+                        "",this::configureOfflineVoiceQuality);
+                v2SettingRow(p,"···","Thinking hum","One quiet offline acknowledgement",
+                        prefs.getBoolean("londe_thinking_hum",true)?"On":"Off",
+                        ()->{
+                            prefs.edit().putBoolean("londe_thinking_hum",
+                                    !prefs.getBoolean("londe_thinking_hum",true)).apply();
+                            render();
+                        });
+                v2SettingRow(p,"☁","ChatGPT account",
+                        ChatGptAuth.isConnected(this)?"Connected":"Optional sign-in",
+                        "",this::chatGptAccountDialog);
+                add(main,p,17);
+                LinearLayout note=v2Panel();
+                add(note,text("Online GPT only after your spoken permission",14,V2_MINT,true),0);
+                add(note,v2Caption("Londe asks aloud before sending an unanswered offline request."),7);
+                add(main,note,13);
+                break;
+            }
+            case "settings_phone": {
+                v2SettingsHeader("Phone & appearance","Make the launcher your own.");
+                LinearLayout p=v2Panel();
+                v2SettingRow(p,"⌂","Default launcher","Use Quiet as your Android home",
+                        "",()->startSafe(new Intent(Settings.ACTION_HOME_SETTINGS)));
+                v2SettingRow(p,"✦","Default voice assistant","Assign Londe as the phone assistant",
+                        "",this::requestAssistantRole);
+                v2SettingRow(p,"◒","Appearance","Ink, Paper or True Black",
+                        "",this::chooseTheme);
+                v2SettingRow(p,"☆","Favourite apps","Choose your essential apps",
+                        "",this::editFavorites);
+                v2SettingRow(p,"⊘","Hidden apps","Manage your app drawer",
+                        "",()->selectApps("hidden","Hide apps"));
+                v2SettingRow(p,"♙","Protected apps","Require device authentication",
+                        "",()->selectApps("protected","Protect apps"));
+                v2SettingRow(p,"◷","Screen time","Review Android usage permission",
+                        hasUsage?"Allowed":"Off",
+                        ()->startSafe(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)));
+                add(main,p,17);
+                break;
+            }
+            default: {
+                v2SettingsHeader("All settings","Advanced controls, diagnostics and legacy options.");
+                add(main,v2Pill("←  Return to overview",()->show("settings")),12);
+                renderSettingsLegacy();
+                return;
+            }
+        }
+        add(main,v2Pill("←  Settings overview",()->show("settings")),24);
+    }
+
+    private void renderSettingsLegacy() {
         add(main, text("Make it yours.", 34, ink, true), 17);
         add(main, text("No account. No ads. Your phone, your rules.", 14, muted, false), 5);
         section(main, "HOME", null, null);

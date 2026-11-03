@@ -78,7 +78,7 @@ public final class LondeActivity extends Activity {
     private TextView answer, caption, status, lastRequest, microphone, speaker, keyboardToggle;
     private LinearLayout keyboardPanel, actionRow;
     private ScrollView answerScroll;
-    private Orb orb;
+    private LondeOrbView orb;
     private int background, surface, ink, secondary, accent;
     private boolean paper;
     private enum Phase { READY, LISTENING, THINKING, SPEAKING, ACTION }
@@ -89,19 +89,19 @@ public final class LondeActivity extends Activity {
                 .getString("theme", "ink"));
         setTheme(paper ? R.style.LondeOverlayPaper : R.style.LondeOverlayDark);
         super.onCreate(saved);
-        background = paper ? Color.rgb(237,236,228) : Color.rgb(17,21,19);
-        surface = paper ? Color.rgb(224,228,217) : Color.rgb(32,40,35);
-        ink = paper ? Color.rgb(35,47,37) : Color.rgb(232,238,231);
-        secondary = paper ? Color.rgb(91,110,93) : Color.rgb(158,176,160);
-        accent = paper ? Color.rgb(70,116,73) : Color.rgb(157,215,168);
+        background = paper ? Color.rgb(237,236,228) : Color.rgb(7,21,16);
+        surface = paper ? Color.rgb(224,228,217) : Color.rgb(18,44,36);
+        ink = paper ? Color.rgb(35,47,37) : Color.rgb(239,251,243);
+        secondary = paper ? Color.rgb(91,110,93) : Color.rgb(160,189,173);
+        accent = paper ? Color.rgb(70,116,73) : Color.rgb(164,246,197);
         Window window = getWindow();
         window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         WindowManager.LayoutParams lp = window.getAttributes();
         lp.width = WindowManager.LayoutParams.MATCH_PARENT;
-        lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
+        lp.height = WindowManager.LayoutParams.MATCH_PARENT;
         lp.gravity = Gravity.BOTTOM;
-        lp.dimAmount = 0.64f;
+        lp.dimAmount = 0.92f;
         window.setAttributes(lp);
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
                 | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
@@ -246,116 +246,168 @@ public final class LondeActivity extends Activity {
         View v = new View(this);
         target.addView(v, new LinearLayout.LayoutParams(1, dp(amount)));
     }
+    private GradientDrawable rounded(int start,int finish,int radius){
+        GradientDrawable d=new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{start,finish});
+        d.setCornerRadius(dp(radius));
+        if(!paper)d.setStroke(dp(1),Color.rgb(49,91,73));
+        return d;
+    }
+    private TextView consoleControl(String label,Runnable action){
+        TextView b=text(label,14,ink,true);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(12),dp(12),dp(12),dp(12));
+        b.setBackground(rounded(surface,paper?surface:Color.rgb(14,33,27),19));
+        b.setOnClickListener(v->action.run());
+        return b;
+    }
     private void createConsole() {
-        LinearLayout root = new LinearLayout(this);
+        LinearLayout root=new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(14), dp(20), dp(22));
-        root.setBackground(panel(background, 10));
+        root.setPadding(dp(19),dp(19),dp(19),dp(22));
+        root.setBackgroundColor(background);
+        root.setOnApplyWindowInsetsListener((v,insets)->{
+            v.setPadding(dp(19), insets.getSystemWindowInsetTop()+dp(14),
+                    dp(19), insets.getSystemWindowInsetBottom()+dp(14));
+            return insets;
+        });
         setContentView(root);
 
-        LinearLayout top = new LinearLayout(this);
+        LinearLayout top=new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView brand = text("LONDE  /  QUIET OS", 15, ink, true);
-        brand.setLetterSpacing(.06f);
-        top.addView(brand, new LinearLayout.LayoutParams(0, dp(36), 1));
-        top.addView(button("✕", this::finish), new LinearLayout.LayoutParams(dp(50), dp(40)));
+        LinearLayout brand= new LinearLayout(this);
+        brand.setOrientation(LinearLayout.VERTICAL);
+        TextView title=text("✦   Londe",24,ink,true);
+        brand.addView(title);
+        TextView tag=text("P R I V A T E   V O I C E   A S S I S T A N T",
+                10,secondary,true);
+        brand.addView(tag);
+        top.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
+        top.addView(consoleControl("✕",this::finish),
+                new LinearLayout.LayoutParams(dp(52),dp(49)));
         root.addView(top);
-        caption = text("VOICE ASSISTANT  ·  READY", 11, secondary, true);
-        caption.setLetterSpacing(.11f);
+        caption=text("VOICE ASSISTANT  ·  READY",11,secondary,true);
+        caption.setLetterSpacing(.10f);
+        caption.setPadding(dp(4),dp(12),0,0);
         root.addView(caption);
 
-        FrameLayout core = new FrameLayout(this);
-        LinearLayout.LayoutParams coreParams = new LinearLayout.LayoutParams(-1, dp(200));
-        coreParams.topMargin = dp(4);
-        root.addView(core, coreParams);
-        orb = new Orb();
-        FrameLayout.LayoutParams orbLayout =
-            new FrameLayout.LayoutParams(dp(220), dp(200), Gravity.CENTER);
-        core.addView(orb, orbLayout);
-        orb.setContentDescription("Londe voice control. Tap to speak.");
-        orb.setOnClickListener(v -> ensureListening());
+        ScrollView content=new ScrollView(this);
+        content.setFillViewport(false);
+        content.setVerticalScrollBarEnabled(false);
+        LinearLayout body=new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(0,dp(4),0,dp(12));
+        content.addView(body);
+        root.addView(content,new LinearLayout.LayoutParams(-1,0,1));
 
-        status = text("TAP TO SPEAK", 16, ink, true);
+        FrameLayout core=new FrameLayout(this);
+        body.addView(core,new LinearLayout.LayoutParams(-1,dp(258)));
+        orb=new LondeOrbView(this);
+        orb.setPalette(background,accent);
+        orb.setState("ready");
+        FrameLayout.LayoutParams orbParams=new FrameLayout.LayoutParams(
+                dp(292),dp(255),Gravity.CENTER);
+        core.addView(orb,orbParams);
+        orb.setContentDescription("Tap Londe to start voice recognition");
+        orb.setOnClickListener(v->ensureListening());
+
+        status=text("READY TO LISTEN",24,ink,true);
         status.setGravity(Gravity.CENTER);
-        status.setLetterSpacing(.06f);
-        root.addView(status);
-        lastRequest = text("Your assistant, not another chat app.", 12, secondary, false);
+        body.addView(status);
+        lastRequest=text("Speak naturally with Londe.",13,secondary,false);
         lastRequest.setGravity(Gravity.CENTER);
-        lastRequest.setMaxLines(2);
-        lastRequest.setPadding(dp(12),dp(8),dp(12),dp(4));
-        root.addView(lastRequest);
+        lastRequest.setMaxLines(3);
+        lastRequest.setPadding(dp(10),dp(9),dp(10),dp(9));
+        body.addView(lastRequest);
 
-        answerScroll = new ScrollView(this);
-        answerScroll.setFillViewport(false);
-        answer = text("Ask a question, or tell me what to do on your phone.", 15, ink, false);
-        answer.setLineSpacing(dp(4),1f);
-        answer.setGravity(Gravity.CENTER_HORIZONTAL);
-        answer.setPadding(dp(16),dp(13),dp(16),dp(13));
-        answerScroll.addView(answer);
-        LinearLayout.LayoutParams answerParams = new LinearLayout.LayoutParams(-1,-2);
-        answerParams.topMargin=dp(12);
-        root.addView(answerScroll,answerParams);
-        answerScroll.setBackground(panel(surface, 5));
-        answerScroll.setMinimumHeight(dp(73));
+        LinearLayout replyCard=new LinearLayout(this);
+        replyCard.setOrientation(LinearLayout.VERTICAL);
+        replyCard.setPadding(dp(17),dp(15),dp(17),dp(15));
+        replyCard.setBackground(rounded(surface,
+                paper?surface:Color.rgb(14,31,26),23));
+        TextView replyLabel=text("✦  LONDE  ·  RESPONSE",12,accent,true);
+        replyLabel.setLetterSpacing(.04f);
+        replyCard.addView(replyLabel);
+
+        answerScroll=new ScrollView(this);
         answerScroll.setVerticalScrollBarEnabled(false);
-        // Avoid growing into a second full-screen chat window.
-        answerScroll.getLayoutParams().height = dp(170);
+        answer=text("Ask a question, or ask me to do something on your phone.",
+                16,ink,false);
+        answer.setLineSpacing(dp(4),1f);
+        answer.setPadding(0,dp(12),0,dp(8));
+        answerScroll.addView(answer);
+        replyCard.addView(answerScroll,new LinearLayout.LayoutParams(-1,dp(155)));
+        LinearLayout.LayoutParams replyParams=new LinearLayout.LayoutParams(-1,-2);
+        replyParams.topMargin=dp(16);
+        body.addView(replyCard,replyParams);
 
-        keyboardPanel = new LinearLayout(this);
+        keyboardPanel=new LinearLayout(this);
         keyboardPanel.setGravity(Gravity.CENTER_VERTICAL);
-        keyboard = new EditText(this);
-        keyboard.setTextColor(ink); keyboard.setHintTextColor(secondary);
-        keyboard.setHint("Ask or give a command...");
-        keyboard.setTextSize(15); keyboard.setSingleLine(true);
+        keyboard=new EditText(this);
+        keyboard.setTextColor(ink);
+        keyboard.setHintTextColor(secondary);
+        keyboard.setHint("Ask or give a command…");
+        keyboard.setSingleLine(true);
+        keyboard.setTextSize(15);
         keyboard.setImeOptions(EditorInfo.IME_ACTION_GO);
-        keyboard.setPadding(dp(12),dp(12),dp(12),dp(12));
-        keyboard.setBackground(panel(surface, 5));
-        keyboardPanel.addView(keyboard,new LinearLayout.LayoutParams(0,dp(49),1));
-        TextView go = button("GO  →",this::submitKeyboard);
-        LinearLayout.LayoutParams goParams=new LinearLayout.LayoutParams(dp(72),dp(49));
-        goParams.leftMargin=dp(7);
-        keyboardPanel.addView(go,goParams);
+        keyboard.setPadding(dp(14),dp(12),dp(14),dp(12));
+        keyboard.setBackground(rounded(surface,surface,15));
+        keyboardPanel.addView(keyboard,new LinearLayout.LayoutParams(0,dp(52),1));
+        TextView send=consoleControl("SEND",this::submitKeyboard);
+        LinearLayout.LayoutParams sendParams=new LinearLayout.LayoutParams(dp(70),dp(52));
+        sendParams.leftMargin=dp(8);
+        keyboardPanel.addView(send,sendParams);
         keyboard.setOnEditorActionListener((v,action,event)->{
-            if(action==EditorInfo.IME_ACTION_GO){submitKeyboard();return true;}return false;
+            if(action==EditorInfo.IME_ACTION_GO){submitKeyboard();return true;}
+            return false;
         });
         keyboardPanel.setVisibility(View.GONE);
-        LinearLayout.LayoutParams kp = new LinearLayout.LayoutParams(-1,dp(51));
-        kp.topMargin=dp(10);
-        root.addView(keyboardPanel,kp);
+        LinearLayout.LayoutParams inputParams=new LinearLayout.LayoutParams(-1,dp(54));
+        inputParams.bottomMargin=dp(10);
+        root.addView(keyboardPanel,inputParams);
 
-        actionRow = new LinearLayout(this);
+        actionRow=new LinearLayout(this);
         actionRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(-1,dp(52));
-        actionParams.topMargin=dp(12);
-        microphone = button("◉  TALK", this::ensureListening);
-        microphone.setOnLongClickListener(v -> { stopListening(); return true; });
-        actionRow.addView(microphone,new LinearLayout.LayoutParams(0,-1,1));
-        keyboardToggle = button("⌨  TYPE",this::toggleKeyboard);
-        LinearLayout.LayoutParams mid = new LinearLayout.LayoutParams(0,-1,1);
-        mid.leftMargin=dp(7);actionRow.addView(keyboardToggle,mid);
-        speaker = button("◖))  ON",this::toggleSound);
+        keyboardToggle=consoleControl("⌨  TYPE",this::toggleKeyboard);
+        actionRow.addView(keyboardToggle,new LinearLayout.LayoutParams(0,dp(57),1));
+        microphone=consoleControl("🎙  TALK",this::ensureListening);
+        microphone.setBackground(rounded(
+                paper?accent:Color.rgb(32,91,65),
+                paper?accent:Color.rgb(26,125,77),24));
+        microphone.setOnLongClickListener(v->{stopListening();return true;});
+        LinearLayout.LayoutParams micParams=new LinearLayout.LayoutParams(0,dp(57),1.25f);
+        micParams.leftMargin=dp(9);
+        actionRow.addView(microphone,micParams);
+        speaker=consoleControl("◖))  ON",this::toggleSound);
         speaker.setOnLongClickListener(v->{voiceSettings();return true;});
-        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0,-1,1);
-        right.leftMargin=dp(7);actionRow.addView(speaker,right);
-        root.addView(actionRow,actionParams);
+        LinearLayout.LayoutParams soundParams=new LinearLayout.LayoutParams(0,dp(57),1);
+        soundParams.leftMargin=dp(9);
+        actionRow.addView(speaker,soundParams);
+        root.addView(actionRow);
 
         LinearLayout shortcuts=new LinearLayout(this);
         shortcuts.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams sh=new LinearLayout.LayoutParams(-1,dp(46));
-        sh.topMargin=dp(9);
-        TextView focus=button("FOCUS 25",()->accept("Start focus for 25 minutes"));
-        shortcuts.addView(focus,new LinearLayout.LayoutParams(0,-1,1));
-        TextView apps=button("APPS",()->accept("Show all apps"));
-        LinearLayout.LayoutParams a=new LinearLayout.LayoutParams(0,-1,1);
-        a.leftMargin=dp(7);shortcuts.addView(apps,a);
-        TextView train=button("TRAIN 30",()->accept("Start a workout for 30 minutes"));
-        LinearLayout.LayoutParams tr=new LinearLayout.LayoutParams(0,-1,1);
-        tr.leftMargin=dp(7);shortcuts.addView(train,tr);
-        root.addView(shortcuts,sh);
-        TextView footer=text("LONG-PRESS SOUND FOR VOICES  ·  ACTIONS NEED APPROVAL",
+        String[] actions={"◎  FOCUS","▦  APPS","◈  TRAIN"};
+        Runnable[] run={
+                ()->accept("Start focus for 25 minutes"),
+                ()->accept("Show all apps"),
+                ()->accept("Start a workout for 30 minutes")
+        };
+        for(int i=0;i<actions.length;i++){
+            LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(43),1);
+            if(i>0)p.leftMargin=dp(7);
+            TextView control=consoleControl(actions[i],run[i]);
+            control.setTextSize(11);
+            shortcuts.addView(control,p);
+        }
+        LinearLayout.LayoutParams shortcutsParams=new LinearLayout.LayoutParams(-1,dp(43));
+        shortcutsParams.topMargin=dp(12);
+        root.addView(shortcuts,shortcutsParams);
+
+        TextView footer=text("LOCAL BY DEFAULT  ·  ONLINE GPT NEEDS SPOKEN PERMISSION",
                 10,secondary,false);
         footer.setGravity(Gravity.CENTER);
-        footer.setPadding(0,dp(12),0,0);
+        footer.setPadding(0,dp(13),0,0);
         root.addView(footer);
     }
 
@@ -363,8 +415,8 @@ public final class LondeActivity extends Activity {
         phase=next;
         status.setText(label);
         caption.setText("VOICE ASSISTANT  ·  "+next.name());
-        microphone.setText(activeSession ? "◉  LISTENING" : "◉  TALK");
-        orb.invalidate();
+        microphone.setText(activeSession ? "◉  LISTENING" : "🎙  TALK");
+        if(orb!=null)orb.setState(next.name().toLowerCase(Locale.ROOT));
     }
     private void say(String value) {
         if (thinkingHum != null) thinkingHum.stop();
@@ -1169,40 +1221,4 @@ public final class LondeActivity extends Activity {
     }
     private void toast(String msg){Toast.makeText(this,msg,Toast.LENGTH_LONG).show();}
 
-    /** Lightweight pulsing listening indicator drawn natively, not an image asset. */
-    private final class Orb extends View {
-        private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
-        Orb() {super(LondeActivity.this);setLayerType(View.LAYER_TYPE_SOFTWARE,null);}
-        @Override protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            float cx=getWidth()/2f,cy=getHeight()/2f;
-            float unit=Math.min(getWidth(),getHeight());
-            boolean active=phase==Phase.LISTENING||phase==Phase.THINKING
-                    ||phase==Phase.SPEAKING;
-            float pulse=active?(float)Math.sin(SystemClock.uptimeMillis()/250.0):0f;
-            float r=unit*.215f;
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(dp(1.5f));
-            for(int i=0;i<3;i++){
-                paint.setColor(accent);
-                paint.setAlpha((int)((active?115:45)/(i+1)));
-                canvas.drawCircle(cx,cy,r+dp(22+i*16)+(active?pulse*dp(3+i*2):0),paint);
-            }
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(accent);paint.setAlpha(36);
-            canvas.drawCircle(cx,cy,r+dp(12),paint);
-            paint.setColor(accent);paint.setAlpha(210);
-            canvas.drawCircle(cx,cy,r+(active?pulse*dp(2):0),paint);
-            paint.setColor(background);paint.setAlpha(235);
-            canvas.drawCircle(cx,cy,r*.60f,paint);
-            paint.setColor(accent);paint.setAlpha(240);
-            paint.setTextAlign(Paint.Align.CENTER);
-            paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            paint.setTextSize(dp(23));
-            canvas.drawText(phase==Phase.LISTENING?"···":phase==Phase.THINKING?"✦":"◉",
-                    cx,cy+dp(8),paint);
-            paint.setAlpha(255);
-            if(active&&isAttachedToWindow())postInvalidateDelayed(42);
-        }
-    }
 }
