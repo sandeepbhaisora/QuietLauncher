@@ -792,11 +792,13 @@ public final class LondeActivity extends Activity {
     /** Qwen failure is never silently passed to an unavailable cloud service. */
     private void askChatGptFallback(String q) {
         if (!CloudAvailability.online(this)) {
+            answerSource = "QUIET · OFFLINE FALLBACK STATUS";
             localAnswer(q, LocalReplyPolicy.offlineMessage());
             setPhase(Phase.READY, "OFFLINE · NO CHATGPT REQUEST");
             return;
         }
         if (!ChatGptAuth.canUsePlan(this)) {
+            answerSource = "QUIET · CHATGPT UNAVAILABLE";
             localAnswer(q, LocalReplyPolicy.unauthorizedMessage());
             setPhase(Phase.READY, "CHATGPT NOT AUTHORIZED");
             return;
@@ -827,6 +829,7 @@ public final class LondeActivity extends Activity {
                 ui.post(()->{
                     if(id!=requestGeneration||isFinishing())return;
                     model=result.model;
+                    answerSource = "CHATGPT · " + result.model + " · ONLINE";
                     memory.add(new LondeClient.Turn("assistant",result.text));
                     if(memory.size()>24)memory.remove(0);
                     showAnswer(result.text);
