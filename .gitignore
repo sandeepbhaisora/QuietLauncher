@@ -1,0 +1,8 @@
+# Downloaded third-party native speech runtime and ONNX model weights.
+# Fetched and checksum-checked by scripts/install_local_voice.sh.
+app/libs/
+app/src/main/assets/quiet_voice/
+*.partial
+.gradle/
+**/build/
+local.properties
