@@ -1965,6 +1965,14 @@ public final class MainActivity extends Activity {
         section(main, "LOCAL AI", null, null);
         setting("On-device AI brain · Qwen3", LocalBrainModels.status(this),
                 this::configureLocalBrain);
+        setting("Test offline AI", "Ask Londe in airplane mode · watch for OFFLINE QWEN3",
+                () -> {
+                    if (!LocalBrainModels.installed(this)) {
+                        configureLocalBrain();
+                        return;
+                    }
+                    openLonde();
+                });
         section(main, "CHATGPT", null, null);
         setting(ChatGptAuth.isConnected(this) ? "ChatGPT account · Connected" : "Connect ChatGPT",
                 ChatGptAuth.account(this) + " · Official open-source sign-in",
