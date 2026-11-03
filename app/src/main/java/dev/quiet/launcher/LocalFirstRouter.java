@@ -78,14 +78,15 @@ final class LocalFirstRouter {
     }
 
     /** Recognized Hindi/Hinglish often includes filler: "abe time kya ho raha hai...". */
+    /** Handles conversational Hindi/Hinglish without catching time complexity. */
     private static boolean isConversationalClockQuestion(String q) {
         if (q.matches("(?s).*(time complexity|time zone|time travel|time management|"
                 + "time machine|time series|run time|runtime|execution time|"
                 + "what is time|explain time|define time).*"))
             return false;
-        boolean mentionsClock = q.matches("(?s).*(\btime\b|\bsamay\b|समय|वक़्त|वक्त|बजे).*");
-        boolean asksNow = q.matches("(?s).*(\bkya\b|\bkitn[aei]\b|\babhi\b|\bnow\b|"
-                + "\bbata\b|\bbaje\b|\bbaj[ae]\b|क्या|कितने|बजे|कितना).*");
+        boolean mentionsClock = q.matches("(?s).*(\\btime\\b|\\bsamay\\b|समय|वक़्त|वक्त|बजे).*");
+        boolean asksNow = q.matches("(?s).*(\\bkya\\b|\\bkitn[aei]\\b|\\babhi\\b|\\bnow\\b|"
+                + "\\bbata\\b|\\bbaje\\b|\\bbaj[ae]\\b|क्या|कितने|बजे|कितना).*");
         return mentionsClock && asksNow;
     }
 
