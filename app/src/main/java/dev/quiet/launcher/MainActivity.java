@@ -836,6 +836,14 @@ public final class MainActivity extends Activity {
                 .setNegativeButton("Cancel",null).show();
     }
 
+    private void changeWakeSensitivity(boolean high) {
+        prefs.edit().putBoolean("londe_wake_high_sensitivity",high).apply();
+        stopWake();
+        LondeVoiceService.refreshWake();
+        handler.postDelayed(this::startWakeIfAllowed,750);
+        render();
+    }
+
     private void configureWake() {
         boolean enabled = prefs.getBoolean("londe_wake_enabled", false);
         if (!LondeKeywordDetector.available(this)) {
@@ -2160,6 +2168,15 @@ public final class MainActivity extends Activity {
                 : prefs.getBoolean("londe_wake_enabled",false)
                     ? "On · offline keyword spotter" : "Off · tap to enable Hey Londe",
                 () -> configureWake());
+        setting("Hey Londe sensitivity",
+                prefs.getBoolean("londe_wake_high_sensitivity",true)
+                    ? "High · easier to trigger, may cause false alarms" : "Standard · fewer false alarms",
+                () -> new AlertDialog.Builder(this)
+                    .setTitle("Hey Londe sensitivity")
+                    .setMessage("The current English-trained keyword model may struggle with Hinglish pronunciation. High sensitivity can help, but may also activate unexpectedly. Change only when needed.")
+                    .setPositiveButton("High", (d,w) -> changeWakeSensitivity(true))
+                    .setNeutralButton("Standard", (d,w) -> changeWakeSensitivity(false))
+                    .setNegativeButton("Cancel",null).show());
         setting("Test Hey Londe detector", "Foreground test · shows model and mic errors",
             () -> {
                 Intent diagnostic = new Intent(this, LondeActivity.class);
