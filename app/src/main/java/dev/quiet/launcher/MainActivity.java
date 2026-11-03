@@ -152,6 +152,15 @@ public final class MainActivity extends Activity {
         widgetHost = new AppWidgetHost(this, WIDGET_HOST_ID);
         setPalette();
         neuralVoice = new LocalNeuralVoice(this);
+        if (getSharedPreferences("londe_voice_v1", MODE_PRIVATE)
+                .getBoolean("neural_crash_warning_pending", false)) {
+            getSharedPreferences("londe_voice_v1", MODE_PRIVATE).edit()
+                    .remove("neural_crash_warning_pending").apply();
+            new AlertDialog.Builder(this).setTitle("Local voice failed")
+                    .setMessage("Quiet detected an interrupted neural speech session and switched to Android voice to prevent repeated crashes. You can try neural voice again in settings.")
+                    .setPositiveButton("OK", null).show();
+        }
+
         initHomeVoice();
         /*londeSpeech=new TextToSpeech(this,code->{
             voiceReady=code==TextToSpeech.SUCCESS;
