@@ -95,9 +95,10 @@ object LocalBrain {
                         For a personal fact you cannot verify, reply with exactly: [FALLBACK]
                         If you genuinely do not know, reply with exactly: [FALLBACK]
                         Device actions are validated by Quiet separately; do not pretend to carry out actions.
-                        Available phone tools: get_battery, get_time, get_focus_status, open_app.
+                        Available phone tools: get_battery, get_time, get_focus_status, get_volume, get_screen_time, list_apps, open_app.
                         Only when the user explicitly requests a phone action, respond exactly as:
                         {"tool":"get_battery"} or {"tool":"get_time"} or {"tool":"get_focus_status"}
+                        or {"tool":"get_volume"} or {"tool":"get_screen_time"} or {"tool":"list_apps"}
                         or {"tool":"open_app","app":"Spotify"}.
                         Never propose sending, deleting, changing permissions, code execution or clicking security prompts.
                         For general questions answer conversationally in plain text. No preamble, markdown or reasoning.
