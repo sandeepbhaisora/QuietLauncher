@@ -2334,10 +2334,10 @@ public final class MainActivity extends Activity {
         };
         int current=LocalBrainModelCatalog.LARGE.equals(
                 LocalBrainModelCatalog.selected(this))?1:0;
+        // A platform AlertDialog cannot reliably render both a message and
+        // a single-choice list: Samsung's Material dialog shows only the message.
+        // Put guidance into the option labels and let the list take the content slot.
         new AlertDialog.Builder(this).setTitle("Choose offline brain")
-                .setMessage("Model weights are downloaded only when you approve. "
-                        + "The larger model may answer better but uses more RAM and can be slower. "
-                        + "Switching a loaded model requires restarting Quiet.")
                 .setSingleChoiceItems(options,current,(dialog,which)->{
                     try {
                         LocalBrainModelCatalog.select(this,which==1
