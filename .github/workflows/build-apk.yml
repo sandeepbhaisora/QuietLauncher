@@ -43,8 +43,8 @@ jobs:
       - name: Test offline conversation exit commands (JVM)
         run: |
           mkdir -p /tmp/quiet-exit-tests
-          javac -encoding UTF-8 -d /tmp/quiet-exit-tests \\
-            app/src/main/java/dev/quiet/launcher/OfflineVoiceCommands.java \\
+          javac -encoding UTF-8 -d /tmp/quiet-exit-tests \
+            app/src/main/java/dev/quiet/launcher/OfflineVoiceCommands.java \
             app/src/test/java/dev/quiet/launcher/OfflineVoiceCommandsTest.java
           java -cp /tmp/quiet-exit-tests dev.quiet.launcher.OfflineVoiceCommandsTest
       - name: Test speech cleanup (JVM)
