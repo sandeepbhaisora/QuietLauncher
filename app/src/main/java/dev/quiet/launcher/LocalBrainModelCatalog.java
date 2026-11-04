@@ -49,6 +49,11 @@ final class LocalBrainModelCatalog {
     static boolean installed(Context c) {
         return LARGE.equals(activeId(c))?largeInstalled(c):LocalBrainModels.installed(c);
     }
+    // Settings must inspect the model the user selected, not the automatic
+    // temporary 0.6B inference fallback. Otherwise the 1.7B download UI vanishes.
+    static boolean selectedInstalled(Context c) {
+        return LARGE.equals(selected(c))?largeInstalled(c):LocalBrainModels.installed(c);
+    }
     static String status(Context c) {
         if(!LARGE.equals(selected(c)))return LocalBrainModels.status(c);
         if(largeInstalled(c))return "Ready · Qwen3 1.7B (4-bit)";
