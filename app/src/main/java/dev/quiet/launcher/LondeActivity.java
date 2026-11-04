@@ -554,7 +554,12 @@ public final class LondeActivity extends Activity {
         LondeVoiceService.pauseWakeForSession();
         final int id = ++wakeDiagnosticGeneration;
         setPhase(Phase.LISTENING, "LOADING LOCAL WAKE MODEL…");
-        showAnswer("Foreground keyword test. Say 'Hey Londe' clearly. It should detect the phrase without a tap. Tap TALK to switch to normal speech recognition.");
+        boolean aliases=getSharedPreferences("quiet_local_v1",MODE_PRIVATE)
+                .getBoolean("londe_wake_short_enabled",false);
+        showAnswer("Offline wake test: say 'Hey Londe' or 'Hey Laundey'. "
+                + (aliases ? "You can also say 'Londe' or 'Laundey' alone. " :
+                  "Enable the experimental short wake phrase in Settings for 'Londe' alone. ")
+                + "Watch the MIC percentage: a moving value means the mic works, not that the phrase was detected.");
         work.execute(() -> {
             OfflineWakePipeline.Detector detector;
             try {
@@ -895,10 +900,12 @@ public final class LondeActivity extends Activity {
         inForeground=false;
         if (thinkingHum != null) thinkingHum.stop();
         releaseRecognizer();
+        LondeVoiceService.setAssistantVisible(false);
         super.onPause();
     }
     @Override protected void onResume(){
         super.onResume();inForeground=true;
+        LondeVoiceService.setAssistantVisible(true);
         LondeVoiceService.pauseWakeForSession();
         if(activeSession&&!busy)ui.postDelayed(()->startRecognition(),550);
     }

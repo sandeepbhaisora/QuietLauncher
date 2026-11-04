@@ -6,7 +6,8 @@ cd "$(dirname "$0")/.."
 NAME="sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"
 DEST="app/src/main/assets/londe_wake"
 mkdir -p "$DEST"
-if [[ -s "$DEST/encoder.onnx" && -s "$DEST/keywords.txt" && -s "$DEST/keywords_short.txt" && -s "$DEST/tokens.txt" ]]; then
+if [[ -s "$DEST/encoder.onnx" && -s "$DEST/keywords.txt" && -s "$DEST/keywords_short.txt" && -s "$DEST/tokens.txt" ]] \
+    && grep -q '@HEY_LAUNDEY' "$DEST/keywords.txt" && grep -q '@LAUNDEY' "$DEST/keywords_short.txt"; then
   exit 0
 fi
 tmp="$(mktemp -d)"
@@ -34,7 +35,9 @@ vocab = {line.rsplit(' ', 1)[0] for line in open(token_path, encoding='utf-8') i
 # because short keywords can trigger by accident.
 phrases = [("HEY LONDE", "HEY_LONDE"),
            ("HEY LONDA", "HEY_LONDA"),
-           ("HEY LAUNDE", "HEY_LAUNDE")]
+           ("HEY LAUNDE", "HEY_LAUNDE"),
+           ("HEY LONDEY", "HEY_LONDEY"),
+           ("HEY LAUNDEY", "HEY_LAUNDEY")]
 lines = []
 for phrase, label in phrases:
     pieces = sp.encode(phrase, out_type=str)
@@ -43,14 +46,15 @@ for phrase, label in phrases:
     lines.append(" ".join(pieces) + " :1.8 #0.28 @" + label)
 with open(output, "w", encoding="utf-8") as f:
     f.write("\n".join(lines) + "\n")
-short_phrases = [("LONDE", "LONDE"), ("LAUNDE", "LAUNDE")]
+short_phrases = [("LONDE", "LONDE"), ("LONDEY", "LONDEY"),
+                 ("LAUNDE", "LAUNDE"), ("LAUNDEY", "LAUNDEY")]
 short_lines = list(lines)
 for phrase, label in short_phrases:
     pieces = sp.encode(phrase, out_type=str)
     if not pieces or any(piece not in vocab for piece in pieces):
         raise SystemExit("Unsupported short wake tokens: " + repr((phrase, pieces)))
     # Higher per-keyword threshold to limit short-word false activations.
-    short_lines.append(" ".join(pieces) + " :1.5 #0.4 @" + label)
+    short_lines.append(" ".join(pieces) + " :1.5 #0.32 @" + label)
 with open(short_output, "w", encoding="utf-8") as f:
     f.write("\n".join(short_lines) + "\n")
 print("Default full wake phrases:", [p for p, _ in phrases])

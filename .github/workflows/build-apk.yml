@@ -133,6 +133,23 @@ jobs:
         run: bash scripts/install_local_voice.sh
       - name: Install bundled offline Hey Londe keyword model
         run: bash scripts/install_londe_wake.sh
+      - name: Verify wake-word phrase aliases
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path("app/src/main/assets/londe_wake")
+          full = (root / "keywords.txt").read_text()
+          short = (root / "keywords_short.txt").read_text()
+          required_full = {"HEY_LONDE", "HEY_LONDA", "HEY_LAUNDE",
+                           "HEY_LONDEY", "HEY_LAUNDEY"}
+          required_short = required_full | {"LONDE", "LONDEY", "LAUNDE", "LAUNDEY"}
+          for name, body, expected in [("full", full, required_full), ("short", short, required_short)]:
+              labels = [line.rsplit("@", 1)[1].strip() for line in body.splitlines() if "@" in line]
+              assert len(labels) == len(set(labels)), f"duplicate {name} wake labels"
+              assert set(labels) == expected, f"{name} wake labels missing/unexpected: {set(labels) ^ expected}"
+              assert all(":" in line and "#" in line for line in body.splitlines()), f"invalid {name} wake line"
+              print(name, sorted(labels))
+          PY
       - name: Keep model weights out of APK (downloadable separately)
         run: |
           # Retain the tiny generated wake-word token phrase; omit ONNX weights.
