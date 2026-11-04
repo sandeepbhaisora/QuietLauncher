@@ -21,6 +21,9 @@ import java.util.concurrent.Executors;
 public final class LondeVoiceService extends VoiceInteractionService {
     private static final String TAG = "LondeVoiceService";
     private static WeakReference<LondeVoiceService> current = new WeakReference<>(null);
+    // Updated synchronously by LondeActivity lifecycle, BEFORE any delayed rearm.
+    // Prevents Home.onPause from stealing the microphone after Londe.onResume.
+    private static volatile boolean assistantVisible;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService loader = Executors.newSingleThreadExecutor();
     private OfflineWakePipeline pipeline;
@@ -38,6 +41,7 @@ public final class LondeVoiceService extends VoiceInteractionService {
     /** Only a live, user-selected system assistant may listen persistently. */
     private boolean permitted() {
         return !destroyed
+                && !assistantVisible
                 && !conversationOwnsMic
                 && isActiveService(this, new ComponentName(this, LondeVoiceService.class))
                 && getSharedPreferences("quiet_local_v1", MODE_PRIVATE)
@@ -119,17 +123,34 @@ public final class LondeVoiceService extends VoiceInteractionService {
 
     static void rearmWake() {
         LondeVoiceService instance = current.get();
-        if (instance != null) instance.ui.post(() -> {
+        if (instance == null || assistantVisible) return;
+        instance.ui.post(() -> {
+            if (assistantVisible || instance.destroyed) return;
             final int lease = instance.microphoneLeaseVersion;
             instance.ui.postDelayed(() -> {
-                // Home.onPause can run before Londe.onResume; a delayed Home
-                // rearm must NOT steal Londe's recognizer microphone.
-                if (instance.destroyed || lease != instance.microphoneLeaseVersion)
-                    return;
+                // Re-check visibility: Home.onPause may run AFTER Londe.onResume.
+                if (assistantVisible || instance.destroyed
+                        || lease != instance.microphoneLeaseVersion) return;
                 instance.conversationOwnsMic = false;
                 instance.startWakeIfAllowed();
             }, 900);
         });
+    }
+
+    /** Activity lifecycle signal is immediate, not a delayed handler message. */
+    static void setAssistantVisible(boolean visible) {
+        assistantVisible = visible;
+        LondeVoiceService instance = current.get();
+        if (instance == null) return;
+        if (visible) {
+            instance.ui.post(() -> {
+                ++instance.microphoneLeaseVersion;
+                instance.conversationOwnsMic = true;
+                instance.stopWake();
+            });
+        } else {
+            rearmWake();
+        }
     }
 
     @Override public void onShutdown() {

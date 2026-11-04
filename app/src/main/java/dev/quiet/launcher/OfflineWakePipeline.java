@@ -34,6 +34,7 @@ final class OfflineWakePipeline {
     private volatile boolean running;
     private Thread worker;
     private AudioRecord microphone;
+    private final Object audioLock = new Object();
     private Detector detector;
 
     OfflineWakePipeline(Context context, Events events) {
@@ -64,6 +65,8 @@ final class OfflineWakePipeline {
             if (microphone.getState() != AudioRecord.STATE_INITIALIZED)
                 throw new IllegalStateException("Microphone unavailable");
             microphone.startRecording();
+            if (microphone.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING)
+                throw new IllegalStateException("Microphone could not record (another voice service may be using it)");
             short[] chunk = new short[1600];
             long lastLevel = android.os.SystemClock.elapsedRealtime();
             int maxPeak = 0;
@@ -112,11 +115,14 @@ final class OfflineWakePipeline {
     }
 
     private void releaseAudio() {
-        AudioRecord mic = microphone;
-        microphone = null;
+        final AudioRecord mic;
+        synchronized(audioLock) {
+            mic = microphone;
+            microphone = null;
+        }
         if (mic == null) return;
         try { mic.stop(); } catch (Exception ignored) {}
-        mic.release();
+        try { mic.release(); } catch (Exception ignored) {}
     }
 
     boolean isRunning() { return running; }

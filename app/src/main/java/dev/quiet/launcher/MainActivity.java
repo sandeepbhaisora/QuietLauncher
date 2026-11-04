@@ -116,6 +116,7 @@ public final class MainActivity extends Activity {
     private String pendingCalendarRequest;
     private OfflineWakePipeline homeWake;
     private int homeWakeGeneration;
+    private int homeWakeFailures;
     private boolean foregroundHome;
     private TextView londeStatus, londeReply;
     private QuietFace assistantFace;
@@ -280,6 +281,7 @@ public final class MainActivity extends Activity {
         // Browser-based ChatGPT OAuth completes only after Quiet becomes active again.
         ChatGptAuth.onLauncherResumed();
         foregroundHome=true;
+        homeWakeFailures=0;
         // Do not start Android SpeechRecognizer when the launcher becomes visible.
         if (initialResumePending) {
             initialResumePending = false;
@@ -918,6 +920,7 @@ public final class MainActivity extends Activity {
 
     private void changeWakeSensitivity(boolean high) {
         prefs.edit().putBoolean("londe_wake_high_sensitivity",high).apply();
+        homeWakeFailures=0;
         stopWake();
         LondeVoiceService.refreshWake();
         handler.postDelayed(this::startWakeIfAllowed,750);
@@ -926,13 +929,12 @@ public final class MainActivity extends Activity {
 
     private void configureWakeKeyword() {
         boolean shortPhrase = prefs.getBoolean("londe_wake_short_enabled", false);
+        // Platform dialogs cannot show a message alongside single-choice items.
+        // The old chooser hid both radio options on Samsung.
         new AlertDialog.Builder(this).setTitle("Londe wake phrase")
-                .setMessage("Default: Hey Londe. Experimental: also respond to Londe alone. "
-                        + "A one-word hotword may activate unexpectedly or be missed. "
-                        + "Detection stays offline and requires the installed wake model.")
                 .setSingleChoiceItems(new String[]{
-                        "Hey Londe (recommended)",
-                        "Hey Londe or Londe (experimental)"}, shortPhrase ? 1 : 0,
+                        "Hey Londe / Hey Laundey · recommended",
+                        "Hey Londe, Londe, Laundey · experimental (false wakes possible)"}, shortPhrase ? 1 : 0,
                         (dialog, which) -> {
                             dialog.dismiss();
                             boolean enabled=which==1;
@@ -1259,6 +1261,7 @@ public final class MainActivity extends Activity {
                             @Override public void onWake() {
                                 if (generation != homeWakeGeneration || !foregroundHome
                                         || !"home".equals(page)) return;
+                                homeWakeFailures=0;
                                 homeWake=null;
                                 ++homeWakeGeneration;
                                 wakeStatus("HEY LONDE · DETECTED");
@@ -1268,14 +1271,16 @@ public final class MainActivity extends Activity {
                             @Override public void onAudioLevel(int percent) {
                                 // PCM capture may be active even if the keyword is not
                                 // recognized. A live level makes this distinction visible.
-                                if(homeWake!=null && !isFinishing())
+                                if(homeWake!=null && !isFinishing()) {
+                                    homeWakeFailures=0; // microphone actually started and supplied PCM
                                     wakeStatus("HEY LONDE · MIC " + percent + "% · SAY WAKE PHRASE");
+                                }
                             }
                             @Override public void onError(String reason) {
                                 if (generation != homeWakeGeneration || !foregroundHome) return;
                                 homeWake=null;
                                 android.util.Log.w("QuietWake",reason);
-                                wakeStatus("HEY LONDE · " + reason);
+                                homeWakeFailure(reason);
                             }
                         });
                 if(pipeline.start(detector)){
@@ -1283,10 +1288,25 @@ public final class MainActivity extends Activity {
                     wakeStatus("HEY LONDE · LISTENING LOCALLY");
                 }else{
                     detector.close();
-                    wakeStatus("HEY LONDE · MICROPHONE UNAVAILABLE");
+                    homeWakeFailure("Microphone unavailable");
                 }
             },350);
         });
+    }
+
+    /** Recover from one-time Samsung audio/recognizer contention without a hot retry loop. */
+    private void homeWakeFailure(String reason) {
+        wakeStatus("HEY LONDE · " + reason);
+        if(!foregroundHome || !"home".equals(page) || ++homeWakeFailures > 3) {
+            if(homeWakeFailures>3)
+                wakeStatus("WAKE STOPPED AFTER 3 ERRORS · CHECK MIC / REOPEN HOME");
+            return;
+        }
+        final int expected=homeWakeGeneration;
+        handler.postDelayed(() -> {
+            if(expected==homeWakeGeneration && foregroundHome && homeWake==null)
+                startWakeIfAllowed();
+        }, 1800L * homeWakeFailures);
     }
 
     private void homeAnswerCalendar(String question) {
@@ -2639,7 +2659,7 @@ public final class MainActivity extends Activity {
                     ? "On · offline keyword spotter" : "Off · tap to enable Hey Londe",
                 () -> configureWake());
         setting("Wake phrase", prefs.getBoolean("londe_wake_short_enabled",false)
-                ? "Hey Londe or Londe · experimental" : "Hey Londe only · recommended",
+                ? "Hey Londe / Londe / Laundey · experimental" : "Hey Londe / Hey Laundey · recommended",
                 this::configureWakeKeyword);
         setting("Hey Londe sensitivity",
                 prefs.getBoolean("londe_wake_high_sensitivity",true)
