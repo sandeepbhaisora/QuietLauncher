@@ -2392,7 +2392,7 @@ public final class MainActivity extends Activity {
 
     private void configureLocalBrain() {
         String status = LocalBrainModelCatalog.status(this);
-        if (LocalBrainModelCatalog.installed(this)) {
+        if (LocalBrainModelCatalog.selectedInstalled(this)) {
             boolean enabled = prefs.getBoolean("londe_local_brain_enabled", true);
             new AlertDialog.Builder(this).setTitle(LocalBrainModelCatalog.label(this) + " · ready")
                     .setMessage(status + "\n\nUses local llama.cpp inference for general questions. Complex or uncertain answers can use the existing ChatGPT connection. No local AI usage fees. The larger model may be slower and use more memory.")
@@ -2533,7 +2533,7 @@ public final class MainActivity extends Activity {
                 v2SettingRow(p,"◈","Choose AI model",LocalBrainModelCatalog.label(this),
                         "Offline",this::chooseLocalBrainModel);
                 v2SettingRow(p,"⬇","Manage / verify selected model",LocalBrainModelCatalog.status(this),
-                        LocalBrainModelCatalog.installed(this)?"Installed":"Optional",this::configureLocalBrain);
+                        LocalBrainModelCatalog.selectedInstalled(this)?"Installed":"Optional",this::configureLocalBrain);
                 v2SettingRow(p,"✦","Test offline AI","Ask Londe without online inference",
                         "",()->{
                             if(!LocalBrainModelCatalog.installed(this)){configureLocalBrain();return;}
