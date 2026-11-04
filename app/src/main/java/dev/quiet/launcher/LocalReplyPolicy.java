@@ -21,7 +21,7 @@ final class LocalReplyPolicy {
     static boolean usableLocalAnswer(String question, String answer) {
         if (answer == null) return false;
         String text = answer.trim();
-        if (text.length() < 3 || text.length() > 900) return false;
+        if (text.length() < 2 || text.length() > 900) return false;
         if (requiresLiveInformation(question)) return false;
         String lower = text.toLowerCase(Locale.ROOT);
         String q = question == null ? "" : question.toLowerCase(Locale.ROOT);
@@ -60,6 +60,14 @@ final class LocalReplyPolicy {
                 + "|(?:i(?:'m| am) )?unable to answer.*)"))
             return false;
         return true;
+    }
+
+    static String modelUnavailableMessage(String selected, boolean enabled, String status) {
+        if(!enabled)
+            return "Offline Qwen is disabled in Quiet Settings. Enable On-device brain to use it.";
+        return "The selected offline model is not ready. " + status
+                + ". Open Settings, On-device brain, and download or verify the model. "
+                + "No online request was made.";
     }
 
     static String offlineMessage() {

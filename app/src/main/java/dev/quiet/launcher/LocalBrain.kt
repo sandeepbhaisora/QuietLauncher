@@ -86,28 +86,25 @@ object LocalBrain {
                         else -> "Match the language of the latest user question."
                     }
                     val instructions = """
-                        You are Londe, a helpful voice assistant. Use the language the user uses.
-                        Never display bracketed control markers such as FALLBACK or ERROR in a normal reply.
-                        Answer the CURRENT question directly in one or two sentences. Do not add a greeting unless the user greets you.
-                        Never output an unrelated day, date or time. Do not repeat an earlier answer to a different question.
-                        You cannot read phone calendars, messages, location or live information. Never invent the user's meetings, plans, or appointments.
-                        For a general knowledge question, give a concise factual answer as plain text.
-                        For a personal fact you cannot verify, reply with exactly: [FALLBACK]
-                        If you genuinely do not know, reply with exactly: [FALLBACK]
-                        Device actions are validated by Quiet separately; do not pretend to carry out actions.
-                        Available phone tools: get_battery, get_time, get_focus_status, get_volume, get_screen_time, list_apps, open_app.
-                        Only when the user explicitly requests a phone action, respond exactly as:
-                        {"tool":"get_battery"} or {"tool":"get_time"} or {"tool":"get_focus_status"}
-                        or {"tool":"get_volume"} or {"tool":"get_screen_time"} or {"tool":"list_apps"}
-                        or {"tool":"open_app","app":"Spotify"}.
-                        Never propose sending, deleting, changing permissions, code execution or clicking security prompts.
-                        For general questions answer conversationally in plain text. No preamble, markdown or reasoning.
+                        You are Londe, a helpful offline conversational assistant.
+                        Answer the user's NEW question directly, in the same language, without
+                        canned greetings, prefabricated refusals, or examples copied verbatim.
+                        Answer everyday knowledge questions normally. You are NOT a FAQ bot.
+                        For any uncertain answer, be transparent about uncertainty.
+                        Never fabricate private phone data, personal messages, calendar events or live news.
+                        If you cannot access a personal or live fact, explain that clearly in plain speech.
+                        You do not have Android access yourself: only validated tools can read the phone.
+                        If and only if the user explicitly requests a PHONE OPERATION, you may return
+                        one exact tool JSON object, such as {"tool":"get_time"},
+                        {"tool":"get_battery"}, {"tool":"get_volume"},
+                        {"tool":"get_focus_status"}, {"tool":"get_screen_time"},
+                        {"tool":"list_apps"}, or {"tool":"open_app","app":"Spotify"}.
+                        Android separately checks every tool against the original user command.
+                        Do not generate shell commands, message sends, deletes or permission changes.
+                        For all other queries output a direct plain-text answer, not JSON,
+                        reasoning traces, control tokens, or a greeting.
                         ${languageInstruction}
                         ${memoryInstruction}
-                        Examples:
-                        User: kya haal chaal hai? -> Badhiya bhai, tu bata kaisa hai?
-                        User: What is a race condition? -> A race condition occurs when timing affects the outcome of concurrent operations.
-                        User: Do I have any meetings today? -> [FALLBACK]
                     """.trimIndent()
                     // The tiny model often copies old answers. Include previous turns
                     // only for explicit follow-up questions that actually need context.
@@ -126,7 +123,8 @@ object LocalBrain {
                             history + "\nNew user request, answer this instead:\n" +
                             question.take(750) + "\n/no_think"
                     }
-                    Llama.complete(model!!, fullQuestion, instructions, 140)
+                    Llama.complete(model!!, fullQuestion, instructions,
+                        if (LocalBrainModelCatalog.LARGE == LocalBrainModelCatalog.selected(app)) 240 else 170)
                     } finally {
                         safety.edit().remove("inference_in_progress").commit()
                     }
@@ -147,23 +145,23 @@ object LocalBrain {
                     main.post { callback.onResult("", null, true, result.tokensPerSecond) }
                     return@launch
                 }
-                val start = body.indexOf('{')
-                val end = body.lastIndexOf('}')
-                if (start < 0 || end <= start) {
+                // Do not mistake an explanation with braces for a JSON action.
+                // Only entire top-level JSON objects are parsed structurally.
+                if (!(body.startsWith("{") && body.endsWith("}"))) {
                     // Small models occasionally ignore JSON instructions. A plain
                     // conversational answer is safe to *display* (never execute)
                     // when it is not an unfinished thinking trace. This makes the
                     // first offline inference test useful despite model variance.
-                    val plain = body.removePrefix("```").removePrefix("json").trim()
-                    if (plain.length in 6..650 && !plain.contains("<think")
-                        && !plain.contains("assistant:") && !plain.startsWith("{")) {
+                    val plain = body.trim()
+                    if (plain.length in 2..800 && !plain.contains("<think")
+                        && !plain.contains("assistant:", ignoreCase = true) && !plain.startsWith("{")) {
                         main.post { callback.onResult(plain, null, !LocalReplyPolicy.usableLocalAnswer(question, plain), result.tokensPerSecond) }
                     } else {
                         main.post { callback.onResult("", null, true, result.tokensPerSecond) }
                     }
                     return@launch
                 }
-                val json = JSONObject(body.substring(start, end + 1))
+                val json = JSONObject(body)
                 when (json.optString("type")) {
                     "answer" -> {
                         val answer = json.optString("text").trim().take(700)
