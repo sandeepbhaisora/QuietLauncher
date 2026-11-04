@@ -6,6 +6,11 @@ public final class LocalReplyPolicyTest {
     }
 
     public static void main(String[] args) {
+        check(LocalReplyPolicy.usableLocalAnswer("What's the result?", "42"),
+                "Short non-empty responses can be useful");
+        check(LocalReplyPolicy.usableLocalAnswer("What do Java blocks use?",
+                "Java blocks use braces { and } to delimit statements."),
+                "Code explanations with braces are ordinary replies");
         check(LocalReplyPolicy.usableLocalAnswer("Explain Kafka", "Kafka is a log-based messaging system."),
                 "Local knowledge must be accepted");
         check(LocalReplyPolicy.usableLocalAnswer("Why is the sky blue?", "Rayleigh scattering."),

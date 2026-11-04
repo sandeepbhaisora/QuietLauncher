@@ -37,7 +37,7 @@ final class LocalFirstRouter {
                 .replace('’', '\'')
                 .replaceAll("[.!?।]+$", "")
                 .trim();
-        q = q.replaceFirst("^(?:hey londe|londe)[, ]+", "").trim();
+        q = q.replaceFirst("^(?:hey (?:londe|londey|launde|laundey)|londe|londey|launde|laundey)[, ]+", "").trim();
 
         if (isTimeQuestion(q)) return fact(Fact.TIME, hindi);
         if (isDateQuestion(q)) return fact(Fact.DATE, hindi);
@@ -67,7 +67,13 @@ final class LocalFirstRouter {
     }
 
     private static boolean isTimeQuestion(String q) {
-        return q.equals("time") || q.equals("time now")
+        return q.equals("time") || q.equals("what is time") || q.equals("what's time")
+                || q.equals("what is time now") || q.equals("what's the time now")
+                || q.equals("time please") || q.equals("time right now")
+                || q.equals("tell me current time") || q.equals("can you tell me the time")
+                || q.equals("could you tell me the time") || q.equals("what time")
+                || q.equals("time bata") || q.equals("time batao")
+                || q.equals("time now")
                 || q.equals("current time") || q.equals("what time is it")
                 || q.equals("what's the time") || q.equals("what is the time")
                 || q.equals("tell me the time") || q.equals("what time is it now")
@@ -82,7 +88,7 @@ final class LocalFirstRouter {
     private static boolean isConversationalClockQuestion(String q) {
         if (q.matches("(?s).*(time complexity|time zone|time travel|time management|"
                 + "time machine|time series|run time|runtime|execution time|"
-                + "what is time|explain time|define time).*"))
+                + "explain time|define time|time in physics|concept of time).*"))
             return false;
         boolean mentionsClock = q.matches("(?s).*(\\btime\\b|\\bsamay\\b|\\bbaje\\b|समय|वक़्त|वक्त|बजे).*");
         boolean asksNow = q.matches("(?s).*(\\bkya\\b|\\bkitn[aei]\\b|\\babhi\\b|\\bnow\\b|"

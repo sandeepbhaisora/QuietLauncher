@@ -21,7 +21,7 @@ final class LocalReplyPolicy {
     static boolean usableLocalAnswer(String question, String answer) {
         if (answer == null) return false;
         String text = answer.trim();
-        if (text.length() < 3 || text.length() > 900) return false;
+        if (text.length() < 2 || text.length() > 900) return false;
         if (requiresLiveInformation(question)) return false;
         String lower = text.toLowerCase(Locale.ROOT);
         String q = question == null ? "" : question.toLowerCase(Locale.ROOT);
