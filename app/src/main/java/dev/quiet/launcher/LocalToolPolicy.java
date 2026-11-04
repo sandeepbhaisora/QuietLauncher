@@ -6,7 +6,7 @@ import java.util.regex.Pattern;
 
 /** Pure whitelisted, non-privileged model tool-selection policy. */
 final class LocalToolPolicy {
-    enum Kind { NONE, BATTERY, DEVICE_TIME, FOCUS_STATUS, APP_REVIEW }
+    enum Kind { NONE, BATTERY, DEVICE_TIME, FOCUS_STATUS, VOLUME, SCREEN_TIME, INSTALLED_APPS, APP_REVIEW }
     static final class Call {
         final Kind kind;
         final String argument;
@@ -29,6 +29,9 @@ final class LocalToolPolicy {
                 || q.matches("(?:battery|battery status|battery percentage|battery kitni hai|"
                 + "battery kitni bachi hai|बैटरी कितनी है|बैटरी कितनी बची है)"))
             return new Call(Kind.BATTERY,"");
+        if(q.matches("(?:what(?:'s| is)? (?:my |the )?|show (?:my |the )?|check (?:my |the )?|tell me (?:my |the )?)(?:volume|volume level|ringer volume|sound level)")||q.matches("(?:volume kitna hai|volume kitni hai|फोन का वॉल्यूम कितना है)"))return new Call(Kind.VOLUME,"");
+        if(q.matches("(?:show|check|tell me|what(?:'s| is)?) (?:my )?(?:screen time|phone usage|app usage)(?: today)?")||q.matches("(?:screen time|screen time today|aaj ka screen time|आज का स्क्रीन टाइम)"))return new Call(Kind.SCREEN_TIME,"");
+        if(q.matches("(?:list|show|which|what) (?:are )?(?:my |the )?(?:installed apps|apps installed|phone apps|installed applications)")||q.matches("(?:list apps|show installed apps|मेरे ऐप कौन से हैं)"))return new Call(Kind.INSTALLED_APPS,"");
         return new Call(Kind.NONE,"");
     }
     static Call fromModel(String originalQuestion,String output) {
@@ -47,6 +50,12 @@ final class LocalToolPolicy {
             case "get_focus_status":
                 return question.matches("(?s).*(?:\\bfocus\\b|deep work|फोकस).*")
                         ?new Call(Kind.FOCUS_STATUS,""):new Call(Kind.NONE,"");
+            case "get_volume":
+                return question.matches("(?s).*(?:volume|ringer|sound level|वॉल्यूम).*")?new Call(Kind.VOLUME,""):new Call(Kind.NONE,"");
+            case "get_screen_time":
+                return question.matches("(?s).*(?:screen time|app usage|phone usage|स्क्रीन टाइम).*")?new Call(Kind.SCREEN_TIME,""):new Call(Kind.NONE,"");
+            case "list_apps":
+                return question.matches("(?s).*(?:installed apps|list apps|phone apps|apps installed|installed applications|मेरे ऐप).*")?new Call(Kind.INSTALLED_APPS,""):new Call(Kind.NONE,"");
             case "open_app":
                 String app=m.group(2);
                 if(app==null||app.isEmpty()||!question.matches("(?s).*(?:\\bopen\\b|"

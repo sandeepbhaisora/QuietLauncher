@@ -166,9 +166,14 @@ jobs:
           name: Quiet-standard-apk
           path: ${{ runner.temp }}/quiet-standard/Quiet-standard.apk
 
+      - name: Restore full manifest before release bundle
+        run: |
+          git show HEAD:app/src/main/AndroidManifest.xml > app/src/main/AndroidManifest.xml
+          grep -q 'android:name=".LondeNotificationListener"' app/src/main/AndroidManifest.xml
+          git diff --exit-code -- app/src/main/AndroidManifest.xml
       - name: Build release Android App Bundle for Play internal testing
         run: |
-          gradle --no-daemon :app:bundleRelease
+          gradle --no-daemon --rerun-tasks :app:bundleRelease
           test -s app/build/outputs/bundle/release/app-release.aab
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             jarsigner -verify app/build/outputs/bundle/release/app-release.aab | grep -q 'jar verified'

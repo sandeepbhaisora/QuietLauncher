@@ -11,6 +11,9 @@ native tool registry has these allowlisted operations:
 | `get_battery` | Read actual Android battery percentage/charging state |
 | `get_time` | Read the Android device clock |
 | `get_focus_status` | Read Quiet focus timer preference |
+| `get_volume` | Read Android media volume, without changing it |
+| `get_screen_time` | Read approximate foreground app usage with Usage Access |
+| `list_apps` | Show a sample of launchable installed apps without opening them |
 | `open_app` | Only if the app name appears in user's explicit open/launch request, then passes to existing Android app/action review |
 
 Direct battery queries bypass Qwen to reduce latency. Existing deterministic
@@ -56,3 +59,6 @@ hot switch. No new model weights are built into the APK.
 
 This build is not a Quiet 2.0 release candidate until it passes actual
 device acceptance tests.
+
+## Full-feature Play bundle safety
+The standard APK temporarily removes notification access from the manifest. The release-bundle workflow now restores the original full manifest and reruns bundle tasks, so the Play release retains notification access.
