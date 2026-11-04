@@ -24,8 +24,14 @@ final class LocalBrainModelCatalog {
         return c.getApplicationContext().getSharedPreferences(CONFIG,Context.MODE_PRIVATE);
     }
     static String selected(Context c) { return prefs(c).getString("model",SMALL); }
+    // Selecting a model must not disable an already verified working model.
+    // The larger model becomes active only after download + SHA-256 verification.
+    static String activeId(Context c) {
+        return LARGE.equals(selected(c)) && !largeInstalled(c) && LocalBrainModels.installed(c)
+                ? SMALL : selected(c);
+    }
     static String label(Context c) {
-        return LARGE.equals(selected(c))?"QWEN3 1.7B · Q4_K_M":"QWEN3 0.6B · Q4_K_M";
+        return LARGE.equals(activeId(c))?"QWEN3 1.7B · Q4_K_M":"QWEN3 0.6B · Q4_K_M";
     }
     static void select(Context c,String modelId) {
         if(!SMALL.equals(modelId)&&!LARGE.equals(modelId))
@@ -35,17 +41,21 @@ final class LocalBrainModelCatalog {
         prefs(c).edit().putString("model",modelId).apply();
     }
     private static File bigFile(Context c) { return new File(c.getExternalFilesDir("models"),BIG_FILE); }
-    static File model(Context c) { return LARGE.equals(selected(c))?bigFile(c):LocalBrainModels.model(c); }
-    static boolean installed(Context c) {
-        if(!LARGE.equals(selected(c)))return LocalBrainModels.installed(c);
+    static File model(Context c) { return LARGE.equals(activeId(c))?bigFile(c):LocalBrainModels.model(c); }
+    private static boolean largeInstalled(Context c) {
         File f=bigFile(c);
         return f.isFile()&&f.length()>=BIG_MIN&&f.length()<=BIG_MAX&&prefs(c).getBoolean("verified",false);
     }
+    static boolean installed(Context c) {
+        return LARGE.equals(activeId(c))?largeInstalled(c):LocalBrainModels.installed(c);
+    }
     static String status(Context c) {
         if(!LARGE.equals(selected(c)))return LocalBrainModels.status(c);
-        if(installed(c))return "Ready · Qwen3 1.7B (4-bit)";
+        if(largeInstalled(c))return "Ready · Qwen3 1.7B (4-bit)";
+        String backup=LocalBrainModels.installed(c)
+                ?" · Qwen3 0.6B continues answering until verification" : "";
         long id=prefs(c).getLong("download_id",-1);
-        if(id<0)return "Not installed · ~1.28 GB Wi-Fi download";
+        if(id<0)return "Not installed · ~1.28 GB Wi-Fi download"+backup;
         DownloadManager dm=(DownloadManager)c.getSystemService(Context.DOWNLOAD_SERVICE);
         if(dm==null)return "Download Manager unavailable";
         try(Cursor cursor=dm.query(new DownloadManager.Query().setFilterById(id))){
@@ -61,7 +71,7 @@ final class LocalBrainModelCatalog {
     }
     static void startDownload(Context c) {
         if(!LARGE.equals(selected(c))){LocalBrainModels.startDownload(c);return;}
-        if(installed(c)||needsVerification(c))return;
+        if(largeInstalled(c)||needsVerification(c))return;
         DownloadManager dm=(DownloadManager)c.getSystemService(Context.DOWNLOAD_SERVICE);
         if(dm==null)throw new IllegalStateException("Download Manager unavailable");
         long old=prefs(c).getLong("download_id",-1);
@@ -90,7 +100,7 @@ final class LocalBrainModelCatalog {
     static boolean needsVerification(Context c){
         if(!LARGE.equals(selected(c)))return LocalBrainModels.needsVerification(c);
         File f=bigFile(c);
-        if(installed(c)||!f.isFile()||f.length()<BIG_MIN||f.length()>BIG_MAX)return false;
+        if(largeInstalled(c)||!f.isFile()||f.length()<BIG_MIN||f.length()>BIG_MAX)return false;
         long id=prefs(c).getLong("download_id",-1);
         if(id<0)return true;
         DownloadManager dm=(DownloadManager)c.getSystemService(Context.DOWNLOAD_SERVICE);

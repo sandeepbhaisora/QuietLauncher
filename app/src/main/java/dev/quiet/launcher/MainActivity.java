@@ -1340,6 +1340,12 @@ public final class MainActivity extends Activity {
         if(replyBusy){wakeStatus("BUSY · TRY AGAIN");return;}
         stopWake();
         if(q.length()>700){wakeStatus("REQUEST TOO LONG");return;}
+        if(OfflineVoiceCommands.isExit(q)) {
+            recentReply="Londe is sleeping. Say Hey Londe to wake me again.";
+            if(londeReply!=null)londeReply.setText(recentReply);
+            wakeStatus("LONDE SESSION CLOSED");
+            return;
+        }
         String remembered = LocalMemoryStore.command(this,q);
         if(remembered != null) {
             if(LocalMemoryPolicy.parse(q).command == LocalMemoryPolicy.Command.FORGET_ALL) {
@@ -1455,12 +1461,24 @@ public final class MainActivity extends Activity {
                     if (isFinishing() || isDestroyed()) return;
                     replyBusy = false;
                     thinkingHum.stop();
-                    homeAskFallback(q);
+                    String response="The offline model failed: "+reason+
+                            ". No online request was made. Check On-device brain in Settings.";
+                    recentReply="You: "+q+"\n\nSOURCE: OFFLINE MODEL ERROR\n\nLonde: "+response;
+                    if(londeReply!=null)londeReply.setText(recentReply);
+                    wakeStatus("OFFLINE MODEL ERROR");
+                    speakLonde(response,"londe-local-error-"+SystemClock.uptimeMillis());
                 }
             });
             return;
         }
-        homeAskFallback(q);
+        String response=LocalReplyPolicy.modelUnavailableMessage(
+                LocalBrainModelCatalog.selected(this),
+                prefs.getBoolean("londe_local_brain_enabled",true),
+                LocalBrainModelCatalog.status(this));
+        recentReply="You: "+q+"\n\nSOURCE: OFFLINE MODEL STATUS\n\nLonde: "+response;
+        if(londeReply!=null)londeReply.setText(recentReply);
+        wakeStatus("LOCAL MODEL NOT READY");
+        speakLonde(response,"londe-no-model-"+SystemClock.uptimeMillis());
     }
 
     private void homeAskFallback(String q) {

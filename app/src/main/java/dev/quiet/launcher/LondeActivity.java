@@ -945,6 +945,15 @@ public final class LondeActivity extends Activity {
         String q=question==null?"":question.trim();
         if(q.isEmpty())return;
         if(q.length()>1500){localAnswer("Input","Please keep requests under 1500 characters.");return;}
+        if(OfflineVoiceCommands.isExit(q)) {
+            activeSession=false;
+            releaseRecognizer();
+            setPhase(Phase.READY, "LONDE SESSION CLOSED");
+            showAnswer("Okay, closing Londe. Say Hey Londe when you need me.");
+            say("ठीक है, फिर बुला लेना।");
+            ui.postDelayed(this::finish,1900);
+            return;
+        }
         lastRequest.setText("YOU  /  "+q);
         answerSource = "LONDE · LOCAL TOOLS";
         String simple = q.toLowerCase(Locale.ROOT).trim().replaceAll("[.!?।]+$", "");
@@ -1085,12 +1094,19 @@ public final class LondeActivity extends Activity {
                     busy = false;
                     thinkingHum.stop();
                     android.util.Log.w("LondeLocalBrain", "Local Qwen failed: " + reason);
-                    askChatGptFallback(q);
+                    answerSource="LONDE · LOCAL MODEL ERROR";
+                    localAnswer(q,"The offline model failed: "+reason+
+                            ". No online request was made. You can retry or check the selected model in Settings.");
                 }
             });
             return;
         }
-        askChatGptFallback(q);
+        answerSource="LONDE · OFFLINE MODEL NOT READY";
+        localAnswer(q,LocalReplyPolicy.modelUnavailableMessage(
+                LocalBrainModelCatalog.selected(this),
+                getSharedPreferences("quiet_local_v1",MODE_PRIVATE)
+                        .getBoolean("londe_local_brain_enabled",true),
+                LocalBrainModelCatalog.status(this)));
     }
 
     /** Qwen failure is never silently passed to an unavailable cloud service. */

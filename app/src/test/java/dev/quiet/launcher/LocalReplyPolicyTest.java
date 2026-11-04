@@ -54,6 +54,10 @@ public final class LocalReplyPolicyTest {
         check(!LocalReplyPolicy.usableLocalAnswer("Can you speak Hindi?",
                 "[ERROR: Cannot read phone calendars, messages, or location.]"),
                 "Raw model error token must not be shown");
+        check(LocalReplyPolicy.modelUnavailableMessage("qwen3_17",true,"Not installed")
+                .contains("not ready"),"Model not installed must be explained accurately");
+        check(LocalReplyPolicy.modelUnavailableMessage("qwen3_06",false,"Ready")
+                .contains("disabled"),"Disabled model is not an inference failure");
         System.out.println("LocalReplyPolicyTest OK");
     }
 }

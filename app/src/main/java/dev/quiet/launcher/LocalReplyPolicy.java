@@ -62,6 +62,14 @@ final class LocalReplyPolicy {
         return true;
     }
 
+    static String modelUnavailableMessage(String selected, boolean enabled, String status) {
+        if(!enabled)
+            return "Offline Qwen is disabled in Quiet Settings. Enable On-device brain to use it.";
+        return "The selected offline model is not ready. " + status
+                + ". Open Settings, On-device brain, and download or verify the model. "
+                + "No online request was made.";
+    }
+
     static String offlineMessage() {
         return "Qwen tried locally but couldn't produce a reliable answer. "
                 + "Your phone is offline, so I didn't contact ChatGPT. "
