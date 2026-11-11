@@ -12,20 +12,7 @@ keytool -genkeypair -v -keystore quiet-upload.jks -alias quiet -keyalg RSA -keys
 
 Set strong passwords when prompted. Save `quiet-upload.jks` and the passwords somewhere private with a backup. **Do not commit or share the keystore or passwords.** Never regenerate it for future updates.
 
-To encode it on macOS:
-
-```sh
-base64 -i quiet-upload.jks | tr -d '\\n' | pbcopy
-```
-
-Go to **GitHub > QuietLauncher > Settings > Secrets and variables > Actions** and add four **repository secrets**:
-
-| Secret | Value |
-| --- | --- |
-| `QUIET_KEYSTORE_BASE64` | Base64 text from the previous command |
-| `QUIET_KEYSTORE_PASSWORD` | Keystore password |
-| `QUIET_KEY_ALIAS` | `quiet` |
-| `QUIET_KEY_PASSWORD` | Key password |
+Keep signing material in GitHub Actions encrypted repository secrets, never in source files, workflow literals, build logs, or published artifacts. The workflow reads the signing keystore and passwords from repository secrets configured under **Settings > Secrets and variables > Actions**. Maintain those values privately; no secret values belong in this document.
 
 ## Install and update
 
