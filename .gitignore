@@ -9,3 +9,16 @@ local.properties
 
 # Downloaded offline keyword spotter artifacts
 app/src/main/assets/londe_wake/
+
+# Signing credentials and local environment secrets (never commit).
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+keystore.properties
+signing.properties
